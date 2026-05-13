@@ -1,0 +1,29 @@
+name: Ranking Consolidado - Copa 2026
+
+on:
+  schedule:
+    - cron: '*/30 * * * *'  # A cada 30 minutos
+  workflow_dispatch:          # Permite rodar manualmente
+
+jobs:
+  ranking:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+
+    steps:
+      - name: Checkout repositorio
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Instalar dependencias
+        run: npm install firebase-admin
+
+      - name: Calcular ranking
+        run: node scripts/sync-ranking.js
+        env:
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+          FIREBASE_PROJECT_ID: copa-do-mundo-3c309

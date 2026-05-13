@@ -2,7 +2,7 @@ name: Ranking Consolidado - Copa 2026
 
 on:
   schedule:
-    - cron: '*/30 * * * *'  # A cada 30 minutos
+    - cron: '*/15 * * * *'  # A cada 15 minutos para teste
   workflow_dispatch:          # Permite rodar manualmente
 
 jobs:

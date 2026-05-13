@@ -2,7 +2,7 @@ name: Ao Vivo - Copa 2026
 
 on:
   schedule:
-    - cron: '* * * * *'   # A cada 1 minuto
+    - cron: '*/5 * * * *'  # A cada 5 minutos
   workflow_dispatch:        # Permite rodar manualmente
 
 jobs:
@@ -26,3 +26,4 @@ jobs:
         run: node scripts/sync-live.js
         env:
           FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+          FIREBASE_PROJECT_ID: copa-do-mundo-3c309

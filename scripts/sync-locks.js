@@ -279,6 +279,3 @@ syncLocks()
     console.error('ERRO CRÍTICO:', e.message);
     process.exit(1);
   });
-    console.error('ERRO CRÍTICO:', e.message);
-    process.exit(1);
-  });

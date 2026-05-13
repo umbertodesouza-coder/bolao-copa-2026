@@ -32,7 +32,10 @@ const TM = {
   'Mexico':'Mexico','South Korea':'Coreia do Sul','Czech Republic':'Rep. Tcheca',
   'Czechia':'Rep. Tcheca','South Africa':'Africa do Sul','Canada':'Canada',
   'Switzerland':'Suica','Qatar':'Catar','Bosnia-Herzegovina':'Bosnia',
-  'Bosnia and Herzegovina':'Bosnia','Brazil':'Brasil','Morocco':'Marrocos',
+  'Bosnia and Herzegovina':'Bosnia',
+  'Bosnia & Herzegovina':'Bosnia',
+  'Bosnia &amp; Herzegovina':'Bosnia',
+  'Brazil':'Brasil','Morocco':'Marrocos',
   'Scotland':'Escocia','Haiti':'Haiti','USA':'EUA','United States':'EUA',
   'Paraguay':'Paraguai','Turkey':'Turquia','Turkiye':'Turquia','Australia':'Australia',
   'Germany':'Alemanha','Ecuador':'Equador','Ivory Coast':'Costa do Marfim',
@@ -49,13 +52,29 @@ const TM = {
 
 // ── PONTO 1: Parsing robusto do round (aceita string ou objeto) ───────────
 const ROUND_MAP = {
+  // Round of 32
   'Round of 32':'r32','Last 32':'r32','Round of 32 ':'r32',
+  // Round of 16
   'Round of 16':'r16','Last 16':'r16','Round of Sixteen':'r16',
-  'Quarter-finals':'qf','Quarterfinals':'qf','Quarter-Finals':'qf',
-  'Semi-finals':'sf','Semifinals':'sf','Semi-Finals':'sf',
-  'Third-place match':'tp','Third Place':'tp','Bronze Final':'tp',
+  // Quarter-finals (todas as variações)
+  'Quarter-finals':'qf','Quarter-final':'qf',
+  'Quarterfinals':'qf','Quarterfinale':'qf',
+  'Quarter-Finals':'qf','Quarter-Final':'qf',
+  'Quartas de final':'qf','Quarterfinal':'qf',
+  // Semi-finals
+  'Semi-finals':'sf','Semi-final':'sf',
+  'Semifinals':'sf','Semifinal':'sf',
+  'Semi-Finals':'sf','Semi-Final':'sf',
+  'Meias-finais':'sf',
+  // Third place
+  'Third-place match':'tp','Third place match':'tp',
+  'Third Place':'tp','Third-Place':'tp',
+  'Match for third place':'tp','Match for Third Place':'tp',
+  'Bronze Final':'tp','3rd Place':'tp',
   'Play-off for third place':'tp','3rd place play-off':'tp',
-  'Final':'final'
+  'Third place':'tp',
+  // Final
+  'Final':'final','The Final':'final'
 };
 
 function parseRoundName(round) {
@@ -259,7 +278,3 @@ syncLocks()
     console.error('ERRO CRÍTICO:', e.message);
     process.exit(1);
   });
-
-syncLocks()
-  .then(() => process.exit(0))
-  .catch(e => { console.error('ERRO:', e.message); process.exit(1); });

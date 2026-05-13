@@ -1,0 +1,28 @@
+name: Ao Vivo - Copa 2026
+
+on:
+  schedule:
+    - cron: '* * * * *'   # A cada 1 minuto
+  workflow_dispatch:        # Permite rodar manualmente
+
+jobs:
+  live:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+
+    steps:
+      - name: Checkout repositorio
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Instalar dependencias
+        run: npm install firebase-admin
+
+      - name: Sincronizar ao vivo
+        run: node scripts/sync-live.js
+        env:
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}

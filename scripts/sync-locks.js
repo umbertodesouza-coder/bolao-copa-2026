@@ -248,6 +248,7 @@ async function syncLocks() {
 
   const wcData = {
     lt, results, lockedMatches, koLockedMatches, groupLockTimes,
+    koMatches,
     lastSync: admin.firestore.FieldValue.serverTimestamp(),
     syncStatus: status,
     syncError: null,
@@ -275,6 +276,9 @@ async function syncLocks() {
 syncLocks()
   .then(() => process.exit(0))
   .catch(e => {
+    console.error('ERRO CRÍTICO:', e.message);
+    process.exit(1);
+  });
     console.error('ERRO CRÍTICO:', e.message);
     process.exit(1);
   });

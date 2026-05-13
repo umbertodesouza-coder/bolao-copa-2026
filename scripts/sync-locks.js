@@ -218,10 +218,21 @@ async function syncLocks() {
       const t2 = TM[m.team2] || m.team2 || 'A definir';
       const tbd = n => !n || ['winner','runner','loser','tbd','a definir']
         .some(x => n.toLowerCase().includes(x));
+      const ksc = m.score?.ft?.length === 2
+        ? { h: String(m.score.ft[0]), a: String(m.score.ft[1]) }
+        : null;
       if (lockTime) lt[kid] = lockTime;
-      if (m.score?.ft?.length === 2)
-        results[kid] = { h: String(m.score.ft[0]), a: String(m.score.ft[1]) };
-      koMatches.push({ id:kid, phase, t1, t2, known:!tbd(t1)&&!tbd(t2) });
+      if (ksc) results[kid] = ksc;
+      koMatches.push({
+        id: kid,
+        phase,
+        date: m.date || null,
+        lt: lockTime || null,
+        t1,
+        t2,
+        score: ksc,
+        known: !tbd(t1) && !tbd(t2)
+      });
       stats.koMatches++;
     }
   }

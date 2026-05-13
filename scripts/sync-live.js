@@ -9,7 +9,7 @@ const admin = require('firebase-admin');
 const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
 admin.initializeApp({
   credential: admin.credential.cert(serviceAccount),
-  projectId: 'copa-do-mundo-3c309'
+  projectId: process.env.FIREBASE_PROJECT_ID || 'copa-do-mundo-3c309'
 });
 const db = admin.firestore();
 

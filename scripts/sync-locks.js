@@ -231,7 +231,7 @@ async function syncLocks() {
         t1,
         t2,
         score: ksc,
-        known: !tbd(t1) && !tbd(t2)
+        known: !tbd(t1) && !tbd(t2) && Date.now() >= new Date('2026-06-27T00:00:00Z').getTime()
       });
       stats.koMatches++;
     }
@@ -282,8 +282,94 @@ async function syncLocks() {
   console.log(`  ✓ Travados: ${lockedMatches.length} grupo | ${koLockedMatches.length} KO`);
   console.log(`  ✓ Resultados: ${Object.keys(results).length}`);
   console.log(`  ✓ Concluído em ${Date.now()-now}ms`);
+
+  // Calcular ranking com os mesmos dados já lidos
+  await syncRanking(results, koMatches, wc.bonusResults||{});
 }
 
+// ── Cálculo de ranking integrado (mesmos dados já carregados) ─────────────
+const PH_SCORE = {
+  group:{r:1,e:3}, r32:{r:2,e:6}, r16:{r:4,e:12},
+  qf:{r:8,e:24}, sf:{r:16,e:48}, tp:{r:16,e:48}, final:{r:32,e:96}
+};
+const BF_PTS = { champion:10, runnerup:6, scorer:5 };
+
+const ALL_MIDS = [];
+GK.forEach(g => {
+  const ts = GD[g];
+  for (let i=0; i<ts.length; i++)
+    for (let j=i+1; j<ts.length; j++)
+      ALL_MIDS.push(g + ALL_MIDS.filter(id=>id.startsWith(g)).length);
+});
+// Rebuild correctly
+ALL_MIDS.length = 0;
+GK.forEach(g => {
+  const mx = getMx(GD[g]);
+  mx.forEach((_, i) => ALL_MIDS.push(g + i));
+});
+
+function scoreMR(p, r, phase) {
+  if (!p || !r || p.h === '' || r.h === '' || p.h == null || r.h == null) return -1;
+  const ph=parseInt(p.h), pa=parseInt(p.a), rh=parseInt(r.h), ra=parseInt(r.a);
+  if (isNaN(ph)||isNaN(pa)||isNaN(rh)||isNaN(ra)) return -1;
+  const phObj = PH_SCORE[phase] || PH_SCORE.group;
+  if (ph===rh && pa===ra) return phObj.e;
+  const pr = ph>pa?'H':ph<pa?'A':'D';
+  const rr = rh>ra?'H':rh<ra?'A':'D';
+  return pr===rr ? phObj.r : 0;
+}
+
+function calcRankScore(pred, results, koMatches, bonusRes) {
+  if (!pred) return {pts:0, exact:0, res:0, filled:0};
+  let pts=0, exact=0, res=0, filled=0;
+  ALL_MIDS.forEach(id => {
+    const p = pred.matches?.[id];
+    if (p && p.h !== '' && p.h != null) filled++;
+    const sc = scoreMR(p, results?.[id], 'group');
+    if (sc === PH_SCORE.group.e) { pts+=sc; exact++; }
+    else if (sc > 0) { pts+=sc; res++; }
+  });
+  (koMatches||[]).forEach(m => {
+    if (!m.score || !pred.ko?.[m.id]) return;
+    const sc = scoreMR(pred.ko[m.id], m.score, m.phase);
+    const phObj = PH_SCORE[m.phase] || PH_SCORE.group;
+    if (sc === phObj.e) { pts+=sc; exact++; }
+    else if (sc > 0) { pts+=sc; res++; }
+  });
+  Object.entries(BF_PTS).forEach(([k, p]) => {
+    if (pred.bonus?.[k] && bonusRes?.[k])
+      if (pred.bonus[k].toLowerCase() === bonusRes[k].toLowerCase()) pts += p;
+  });
+  return {pts, exact, res, filled};
+}
+
+async function syncRanking(results, koMatches, bonusRes) {
+  console.log('  Calculando ranking...');
+  const [usersSnap, predsSnap] = await Promise.all([
+    db.collection('users').get(),
+    db.collection('predictions').get()
+  ]);
+  const users = {}, preds = {};
+  usersSnap.forEach(d => { users[d.id] = d.data(); });
+  predsSnap.forEach(d => { preds[d.id] = d.data(); });
+
+  const entries = Object.keys(users).map(uid => {
+    const sc = calcRankScore(preds[uid], results, koMatches, bonusRes);
+    return { uid, name: users[uid].displayName||'Sem nome',
+             pts:sc.pts, exact:sc.exact, res:sc.res, filled:sc.filled };
+  });
+  entries.sort((a,b) => b.pts-a.pts || b.exact-a.exact || b.res-a.res);
+
+  await db.doc('config/ranking').set({
+    entries,
+    totalUsers: entries.length,
+    updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    calculatedAt: new Date().toISOString()
+  });
+  console.log(`  ✓ Ranking: ${entries.length} participantes · 1º ${entries[0]?.name} (${entries[0]?.pts}pts)`);
+}
+
+// ── Execução principal ─────────────────────────────────────────────────────
 syncLocks()
   .then(() => process.exit(0))
   .catch(e => {

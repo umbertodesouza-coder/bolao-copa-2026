@@ -501,20 +501,20 @@ function avHtml(name,size){size=size||36;return '<div style="width:'+size+'px;he
 
 // ── Bandeiras (flag-icons) ─────────────────────────────────────────────────
 var FLAGS={
-  'México':'mx','Coreia do Sul':'kr','Rep. Tcheca':'cz','África do Sul':'za',
-  'Canadá':'ca','Suíça':'ch','Catar':'qa','Bósnia':'ba',
-  'Brasil':'br','Marrocos':'ma','Escócia':'gb-sct','Haiti':'ht',
-  'EUA':'us','Paraguai':'py','Turquia':'tr','Austrália':'au',
-  'Alemanha':'de','Equador':'ec','Costa do Marfim':'ci','Curaçao':'cw',
-  'Holanda':'nl','Japão':'jp','Suécia':'se','Tunísia':'tn',
-  'Bélgica':'be','Irã':'ir','Egito':'eg','Nova Zelândia':'nz',
-  'Espanha':'es','Uruguai':'uy','Arábia Saudita':'sa','Cabo Verde':'cv',
-  'França':'fr','Senegal':'sn','Noruega':'no','Iraque':'iq',
-  'Argentina':'ar','Áustria':'at','Argélia':'dz','Jordânia':'jo',
-  'Portugal':'pt','Colômbia':'co','Uzbequistão':'uz','RD Congo':'cd',
-  'Inglaterra':'gb-eng','Croácia':'hr','Gana':'gh','Panamá':'pa'
+  'México':'🇲🇽','Coreia do Sul':'🇰🇷','Rep. Tcheca':'🇨🇿','África do Sul':'🇿🇦',
+  'Canadá':'🇨🇦','Suíça':'🇨🇭','Catar':'🇶🇦','Bósnia':'🇧🇦',
+  'Brasil':'🇧🇷','Marrocos':'🇲🇦','Escócia':'🏴󠁧󠁢󠁳󠁣󠁴󠁿','Haiti':'🇭🇹',
+  'EUA':'🇺🇸','Paraguai':'🇵🇾','Turquia':'🇹🇷','Austrália':'🇦🇺',
+  'Alemanha':'🇩🇪','Equador':'🇪🇨','Costa do Marfim':'🇨🇮','Curaçao':'🇨🇼',
+  'Holanda':'🇳🇱','Japão':'🇯🇵','Suécia':'🇸🇪','Tunísia':'🇹🇳',
+  'Bélgica':'🇧🇪','Irã':'🇮🇷','Egito':'🇪🇬','Nova Zelândia':'🇳🇿',
+  'Espanha':'🇪🇸','Uruguai':'🇺🇾','Arábia Saudita':'🇸🇦','Cabo Verde':'🇨🇻',
+  'França':'🇫🇷','Senegal':'🇸🇳','Noruega':'🇳🇴','Iraque':'🇮🇶',
+  'Argentina':'🇦🇷','Áustria':'🇦🇹','Argélia':'🇩🇿','Jordânia':'🇯🇴',
+  'Portugal':'🇵🇹','Colômbia':'🇨🇴','Uzbequistão':'🇺🇿','RD Congo':'🇨🇩',
+  'Inglaterra':'🏴󠁧󠁢󠁥󠁮󠁧󠁿','Croácia':'🇭🇷','Gana':'🇬🇭','Panamá':'🇵🇦'
 };
-function flagHtml(team){var iso=FLAGS[team];if(!iso)return'';return'<img src="https://cdn.jsdelivr.net/npm/flag-icons@7.2.3/flags/4x3/'+iso+'.svg" style="width:20px;height:14px;vertical-align:middle;margin-right:4px;border-radius:2px;" loading="lazy" onerror="this.style.display=\'none\'">';}
+function flagHtml(team){var f=FLAGS[team];return f?'<span style="margin-right:4px;font-size:15px;vertical-align:middle;">'+f+'</span>':'';}
 
 var unsubs=[];
 setTimeout(function(){if(S.screen==='loading'){S.screen='auth';render();}},8000);
@@ -768,10 +768,9 @@ function doSetup(){
     .then(function(){
       S.profile={displayName:name};
       S.apPrivate[S.user.uid]={phone:phone,email:S.user.email};
-      // Adiciona imediatamente ao ranking para o usuário se ver
       S.groupId=groupId;
-      addToRanking(S.user.uid, name);
       S.screen='app';startL();startFetch();render();
+      showToast('Bem-vindo! Você aparecerá no ranking em até 5 minutos.');
     })
     .catch(function(e){
       if(btn)btn.textContent='Entrar no bolão';
@@ -1575,20 +1574,6 @@ function loadDetail(uid){
     .catch(function(){S.detailLoading=false;render();});
 }
 
-// Adiciona novo usuário ao ranking imediatamente após cadastro
-function addToRanking(uid, name){
-  // Verifica se já existe antes de adicionar
-  var current=S.ranking||[];
-  if(current.some(function(e){return e.uid===uid;}))return;
-  // Usa update com arrayUnion — operação atômica, sem race condition
-  var newEntry={uid:uid,name:name,pts:0,exact:0,res:0,filled:0};
-  db.doc('config/ranking').set({
-    entries:firebase.firestore.FieldValue.arrayUnion(newEntry),
-    updatedAt:firebase.firestore.FieldValue.serverTimestamp()
-  },{merge:true}).catch(function(e){
-    console.warn('addToRanking falhou (será corrigido pelo sync):',e.message);
-  });
-}
 
 function exportCSV(){
   if(Object.keys(S.ap).length===0){
@@ -1686,7 +1671,7 @@ function renderAdmGroups(){
         '<div style="background:rgba(0,0,0,.2);border-radius:6px;padding:8px 10px;font-size:11px;color:var(--txt2);word-break:break-all;margin-bottom:8px;">'+url+'</div>'+
         '<div style="display:flex;gap:6px;flex-wrap:wrap;">'+
         '<button class="bo bsm" data-url="'+url+'" onclick="copyGroupLink(this.dataset.url)">&#128203; Copiar link</button>'+
-        '<button class="bo bsm" data-url="'+url+'" data-name="'+(g.name||gid)+'" onclick="shareGroupLink(this.dataset.url,this.dataset.name)">&#128228; Compartilhar</button>'+
+        '<button class="bo bsm" data-url="'+url+'" onclick="shareGroupLink(this.dataset.url,''+( g.name||gid)+'')">&#128228; Compartilhar</button>'+
         '</div></div>';
     }).join('');
 

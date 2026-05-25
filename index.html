@@ -8,6 +8,7 @@
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
 <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flag-icons@7.2.3/css/flag-icons.min.css">
 <style>
 *{box-sizing:border-box;margin:0;padding:0;}
 html,body{overflow-x:hidden;max-width:100vw;}
@@ -514,7 +515,7 @@ var FLAGS={
   'Portugal':'🇵🇹','Colômbia':'🇨🇴','Uzbequistão':'🇺🇿','RD Congo':'🇨🇩',
   'Inglaterra':'🏴󠁧󠁢󠁥󠁮󠁧󠁿','Croácia':'🇭🇷','Gana':'🇬🇭','Panamá':'🇵🇦'
 };
-function flagHtml(team){var f=FLAGS[team];return f?'<span style="margin-right:4px;font-size:15px;vertical-align:middle;">'+f+'</span>':'';}
+function flagHtml(team){var f=FLAGS[team];return f?'<span style="margin-right:4px;font-size:15px;vertical-align:middle;font-family:Apple Color Emoji,Segoe UI Emoji,Noto Color Emoji,sans-serif;">'+f+'</span>':'';}
 
 var unsubs=[];
 setTimeout(function(){if(S.screen==='loading'){S.screen='auth';render();}},8000);
@@ -768,9 +769,10 @@ function doSetup(){
     .then(function(){
       S.profile={displayName:name};
       S.apPrivate[S.user.uid]={phone:phone,email:S.user.email};
+      // Adiciona imediatamente ao ranking para o usuário se ver
       S.groupId=groupId;
+      addToRanking(S.user.uid, name);
       S.screen='app';startL();startFetch();render();
-      showToast('Bem-vindo! Você aparecerá no ranking em até 5 minutos.');
     })
     .catch(function(e){
       if(btn)btn.textContent='Entrar no bolão';
@@ -1574,6 +1576,20 @@ function loadDetail(uid){
     .catch(function(){S.detailLoading=false;render();});
 }
 
+// Adiciona novo usuário ao ranking imediatamente após cadastro
+function addToRanking(uid, name){
+  // Verifica se já existe antes de adicionar
+  var current=S.ranking||[];
+  if(current.some(function(e){return e.uid===uid;}))return;
+  // Usa update com arrayUnion — operação atômica, sem race condition
+  var newEntry={uid:uid,name:name,pts:0,exact:0,res:0,filled:0};
+  db.doc('config/ranking').set({
+    entries:firebase.firestore.FieldValue.arrayUnion(newEntry),
+    updatedAt:firebase.firestore.FieldValue.serverTimestamp()
+  },{merge:true}).catch(function(e){
+    console.warn('addToRanking falhou (será corrigido pelo sync):',e.message);
+  });
+}
 
 function exportCSV(){
   if(Object.keys(S.ap).length===0){
@@ -1671,7 +1687,7 @@ function renderAdmGroups(){
         '<div style="background:rgba(0,0,0,.2);border-radius:6px;padding:8px 10px;font-size:11px;color:var(--txt2);word-break:break-all;margin-bottom:8px;">'+url+'</div>'+
         '<div style="display:flex;gap:6px;flex-wrap:wrap;">'+
         '<button class="bo bsm" data-url="'+url+'" onclick="copyGroupLink(this.dataset.url)">&#128203; Copiar link</button>'+
-        '<button class="bo bsm" data-url="'+url+'" onclick="shareGroupLink(this.dataset.url,''+( g.name||gid)+'')">&#128228; Compartilhar</button>'+
+        '<button class="bo bsm" data-url="'+url+'" data-name="'+(g.name||gid)+'" onclick="shareGroupLink(this.dataset.url,this.dataset.name)">&#128228; Compartilhar</button>'+
         '</div></div>';
     }).join('');
 

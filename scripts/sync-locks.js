@@ -1,6 +1,7 @@
 /**
  * Bolão Copa 2026 — Sincronizador automático
  * GitHub Actions — roda a cada 5 minutos
+ * v2 — Multi-grupo: ranking calculado por grupo + global
  */
 
 const admin = require('firebase-admin');
@@ -32,10 +33,8 @@ const TM = {
   'Mexico':'Mexico','South Korea':'Coreia do Sul','Czech Republic':'Rep. Tcheca',
   'Czechia':'Rep. Tcheca','South Africa':'Africa do Sul','Canada':'Canada',
   'Switzerland':'Suica','Qatar':'Catar','Bosnia-Herzegovina':'Bosnia',
-  'Bosnia and Herzegovina':'Bosnia',
-  'Bosnia & Herzegovina':'Bosnia',
-  'Bosnia &amp; Herzegovina':'Bosnia',
-  'Brazil':'Brasil','Morocco':'Marrocos',
+  'Bosnia and Herzegovina':'Bosnia','Bosnia & Herzegovina':'Bosnia',
+  'Bosnia &amp; Herzegovina':'Bosnia','Brazil':'Brasil','Morocco':'Marrocos',
   'Scotland':'Escocia','Haiti':'Haiti','USA':'EUA','United States':'EUA',
   'Paraguay':'Paraguai','Turkey':'Turquia','Turkiye':'Turquia','Australia':'Australia',
   'Germany':'Alemanha','Ecuador':'Equador','Ivory Coast':'Costa do Marfim',
@@ -50,40 +49,24 @@ const TM = {
   'Curacao':'Curacao','Curaçao':'Curacao','Korea Republic':'Coreia do Sul'
 };
 
-// ── PONTO 1: Parsing robusto do round (aceita string ou objeto) ───────────
 const ROUND_MAP = {
-  // Round of 32
   'Round of 32':'r32','Last 32':'r32','Round of 32 ':'r32',
-  // Round of 16
   'Round of 16':'r16','Last 16':'r16','Round of Sixteen':'r16',
-  // Quarter-finals (todas as variações)
-  'Quarter-finals':'qf','Quarter-final':'qf',
-  'Quarterfinals':'qf','Quarterfinale':'qf',
-  'Quarter-Finals':'qf','Quarter-Final':'qf',
-  'Quartas de final':'qf','Quarterfinal':'qf',
-  // Semi-finals
-  'Semi-finals':'sf','Semi-final':'sf',
-  'Semifinals':'sf','Semifinal':'sf',
-  'Semi-Finals':'sf','Semi-Final':'sf',
-  'Meias-finais':'sf',
-  // Third place
-  'Third-place match':'tp','Third place match':'tp',
-  'Third Place':'tp','Third-Place':'tp',
-  'Match for third place':'tp','Match for Third Place':'tp',
-  'Bronze Final':'tp','3rd Place':'tp',
-  'Play-off for third place':'tp','3rd place play-off':'tp',
-  'Third place':'tp',
-  // Final
+  'Quarter-finals':'qf','Quarter-final':'qf','Quarterfinals':'qf','Quarterfinale':'qf',
+  'Quarter-Finals':'qf','Quarter-Final':'qf','Quartas de final':'qf','Quarterfinal':'qf',
+  'Semi-finals':'sf','Semi-final':'sf','Semifinals':'sf','Semifinal':'sf',
+  'Semi-Finals':'sf','Semi-Final':'sf','Meias-finais':'sf',
+  'Third-place match':'tp','Third place match':'tp','Third Place':'tp',
+  'Third-Place':'tp','Match for third place':'tp','Match for Third Place':'tp',
+  'Bronze Final':'tp','3rd Place':'tp','Play-off for third place':'tp',
+  '3rd place play-off':'tp','Third place':'tp',
   'Final':'final','The Final':'final'
 };
 
 function parseRoundName(round) {
   if (!round) return '';
-  // Aceita string simples OU objeto {name, pos, key}
   if (typeof round === 'string') return round.trim();
-  if (typeof round === 'object') {
-    return (round.name || round.key || round.label || '').trim();
-  }
+  if (typeof round === 'object') return (round.name || round.key || round.label || '').trim();
   return String(round).trim();
 }
 
@@ -119,32 +102,15 @@ function parseMT(d, t) {
   return dt.getTime();
 }
 
-// ── PONTO 3: Validação do JSON ────────────────────────────────────────────
 function validateData(data, stats) {
   const warnings = [];
-  if (!data || !data.matches) {
-    warnings.push('JSON sem campo "matches"');
-    return warnings;
-  }
-  if (data.matches.length === 0) {
-    warnings.push('Campo "matches" está vazio');
-    return warnings;
-  }
-  if (stats.groupMatches === 0) {
-    warnings.push('Nenhum jogo de grupo encontrado — verifique o formato do JSON');
-  }
-  if (stats.groupMatches < 72 && stats.groupMatches > 0) {
-    warnings.push(`Apenas ${stats.groupMatches}/72 jogos de grupo encontrados`);
-  }
-  if (stats.unknownTeams.length > 0) {
-    warnings.push(`Times não reconhecidos: ${stats.unknownTeams.slice(0,5).join(', ')}`);
-  }
-  if (stats.roundFormats.mixed) {
-    warnings.push(`Formato misto de rounds detectado (string + objeto)`);
-  }
-  if (stats.koMatches > 0 && stats.koPhasesMissing.length > 0) {
-    warnings.push(`Fases KO sem mapeamento: ${stats.koPhasesMissing.join(', ')}`);
-  }
+  if (!data || !data.matches) { warnings.push('JSON sem campo "matches"'); return warnings; }
+  if (data.matches.length === 0) { warnings.push('Campo "matches" está vazio'); return warnings; }
+  if (stats.groupMatches === 0) warnings.push('Nenhum jogo de grupo encontrado — verifique o formato do JSON');
+  if (stats.groupMatches < 72 && stats.groupMatches > 0) warnings.push(`Apenas ${stats.groupMatches}/72 jogos de grupo encontrados`);
+  if (stats.unknownTeams.length > 0) warnings.push(`Times não reconhecidos: ${stats.unknownTeams.slice(0,5).join(', ')}`);
+  if (stats.roundFormats.mixed) warnings.push(`Formato misto de rounds detectado (string + objeto)`);
+  if (stats.koMatches > 0 && stats.koPhasesMissing.length > 0) warnings.push(`Fases KO sem mapeamento: ${stats.koPhasesMissing.join(', ')}`);
   return warnings;
 }
 
@@ -165,8 +131,7 @@ async function syncLocks() {
     console.error('Erro ao buscar dados:', fetchError);
     await db.doc('config/wc').set({
       lastSync: admin.firestore.FieldValue.serverTimestamp(),
-      syncStatus: 'error',
-      syncError: fetchError,
+      syncStatus: 'error', syncError: fetchError,
       syncMessage: `Falha ao buscar openfootball: ${fetchError}`
     }, { merge: true });
     return;
@@ -184,7 +149,6 @@ async function syncLocks() {
     const lockTime = parseMT(m.date, m.time);
 
     if (m.group) {
-      // ── Fase de grupos ────────────────────────────────────────────────
       const mid = findMid(m.team1, m.team2);
       if (!mid) {
         if (!stats.unknownTeams.includes(m.team1)) stats.unknownTeams.push(m.team1);
@@ -192,21 +156,17 @@ async function syncLocks() {
         continue;
       }
       if (lockTime) lt[mid] = lockTime;
-      if (m.score?.ft?.length === 2)
-        results[mid] = { h: String(m.score.ft[0]), a: String(m.score.ft[1]) };
+      if (m.score?.ft?.length === 2) results[mid] = { h: String(m.score.ft[0]), a: String(m.score.ft[1]) };
       stats.groupMatches++;
 
     } else if (m.round !== undefined) {
-      // ── Mata-mata — PONTO 1: aceita round como string ou objeto ───────
       const rawRound = m.round;
       if (typeof rawRound === 'string') stats.roundFormats.string++;
       else if (typeof rawRound === 'object') stats.roundFormats.object++;
-      if (stats.roundFormats.string > 0 && stats.roundFormats.object > 0)
-        stats.roundFormats.mixed = true;
+      if (stats.roundFormats.string > 0 && stats.roundFormats.object > 0) stats.roundFormats.mixed = true;
 
       const rname = parseRoundName(rawRound);
       const phase = ROUND_MAP[rname] || ROUND_MAP[rname.replace(/\s+/g,' ')];
-
       if (!phase) {
         if (!stats.koPhasesMissing.includes(rname)) stats.koPhasesMissing.push(rname);
         console.warn(`  Round não mapeado: "${rname}"`);
@@ -216,59 +176,43 @@ async function syncLocks() {
       const kid = `${phase}_${roundCtrs[phase]++}`;
       const t1 = TM[m.team1] || m.team1 || 'A definir';
       const t2 = TM[m.team2] || m.team2 || 'A definir';
-      const tbd = n => !n || ['winner','runner','loser','tbd','a definir']
-        .some(x => n.toLowerCase().includes(x));
-      const ksc = m.score?.ft?.length === 2
-        ? { h: String(m.score.ft[0]), a: String(m.score.ft[1]) }
-        : null;
+      const tbd = n => !n || ['winner','runner','loser','tbd','a definir'].some(x => n.toLowerCase().includes(x));
+      const ksc = m.score?.ft?.length === 2 ? { h: String(m.score.ft[0]), a: String(m.score.ft[1]) } : null;
       if (lockTime) lt[kid] = lockTime;
       if (ksc) results[kid] = ksc;
       koMatches.push({
-        id: kid,
-        phase,
-        date: m.date || null,
-        lt: lockTime || null,
-        t1,
-        t2,
-        score: ksc,
+        id: kid, phase, date: m.date || null, lt: lockTime || null,
+        t1, t2, score: ksc,
         known: !tbd(t1) && !tbd(t2) && Date.now() >= new Date('2026-06-27T00:00:00Z').getTime()
       });
       stats.koMatches++;
     }
   }
 
-  // ── Calcular lockedMatches ────────────────────────────────────────────
   const lockedMatches = Object.keys(lt).filter(mid => !mid.includes('_') && lt[mid] <= now);
   const koLockedMatches = Object.keys(lt).filter(mid => mid.includes('_') && lt[mid] <= now);
 
-  // ── Calcular groupLockTimes por grupo ─────────────────────────────────
   const groupLockTimes = {};
   GK.forEach(g => {
     const gTimes = [0,1,2,3,4,5].map(i => lt[g+i]).filter(Boolean);
-    if (gTimes.length > 0)
-      groupLockTimes[g] = admin.firestore.Timestamp.fromMillis(Math.min(...gTimes));
+    if (gTimes.length > 0) groupLockTimes[g] = admin.firestore.Timestamp.fromMillis(Math.min(...gTimes));
   });
 
   const allGroupTimes = Object.values(groupLockTimes);
   const firstMatchTime = allGroupTimes.length > 0
     ? allGroupTimes.reduce((a,b) => a.toMillis()<b.toMillis()?a:b) : null;
 
-  // ── PONTO 3: Validar e gravar status ─────────────────────────────────
   const warnings = validateData(data, stats);
   const status = warnings.length === 0 ? 'ok' : 'warning';
 
   const wcData = {
-    lt, results, lockedMatches, koLockedMatches, groupLockTimes,
-    koMatches,
+    lt, results, lockedMatches, koLockedMatches, groupLockTimes, koMatches,
     lastSync: admin.firestore.FieldValue.serverTimestamp(),
-    syncStatus: status,
-    syncError: null,
+    syncStatus: status, syncError: null,
     syncMessage: warnings.length > 0 ? warnings.join(' | ') : null,
     syncStats: {
-      groupMatches: stats.groupMatches,
-      koMatches: stats.koMatches,
-      lockedCount: lockedMatches.length,
-      koLockedCount: koLockedMatches.length,
+      groupMatches: stats.groupMatches, koMatches: stats.koMatches,
+      lockedCount: lockedMatches.length, koLockedCount: koLockedMatches.length,
       warnings: warnings
     }
   };
@@ -283,17 +227,15 @@ async function syncLocks() {
   console.log(`  ✓ Resultados: ${Object.keys(results).length}`);
   console.log(`  ✓ Concluído em ${Date.now()-now}ms`);
 
-  // ── FIX: ler bonusResults do Firestore (definido pelo admin no painel) ─
+  // Ler bonusResults do Firestore (definido pelo admin no painel)
   const wcSnap = await db.doc('config/wc').get();
-  const bonusResults = (wcSnap.exists && wcSnap.data().bonusResults)
-    ? wcSnap.data().bonusResults
-    : {};
+  const bonusResults = (wcSnap.exists && wcSnap.data().bonusResults) ? wcSnap.data().bonusResults : {};
 
-  // Calcular ranking com os mesmos dados já lidos
+  // Calcular ranking com os dados já lidos
   await syncRanking(results, koMatches, bonusResults);
 }
 
-// ── Cálculo de ranking integrado (mesmos dados já carregados) ─────────────
+// ── Cálculo de ranking integrado ──────────────────────────────────────────
 const PH_SCORE = {
   group:{r:1,e:3}, r32:{r:2,e:6}, r16:{r:4,e:12},
   qf:{r:8,e:24}, sf:{r:16,e:48}, tp:{r:16,e:48}, final:{r:32,e:96}
@@ -301,14 +243,6 @@ const PH_SCORE = {
 const BF_PTS = { champion:10, runnerup:6, scorer:5 };
 
 const ALL_MIDS = [];
-GK.forEach(g => {
-  const ts = GD[g];
-  for (let i=0; i<ts.length; i++)
-    for (let j=i+1; j<ts.length; j++)
-      ALL_MIDS.push(g + ALL_MIDS.filter(id=>id.startsWith(g)).length);
-});
-// Rebuild correctly
-ALL_MIDS.length = 0;
 GK.forEach(g => {
   const mx = getMx(GD[g]);
   mx.forEach((_, i) => ALL_MIDS.push(g + i));
@@ -359,26 +293,55 @@ async function syncRanking(results, koMatches, bonusRes) {
   usersSnap.forEach(d => { users[d.id] = d.data(); });
   predsSnap.forEach(d => { preds[d.id] = d.data(); });
 
-  const entries = Object.keys(users).map(uid => {
+  // Agrupar usuários por groupId
+  const groupEntries = {};
+  const allEntries = [];
+  const sortFn = (a,b) => b.pts-a.pts || b.exact-a.exact || b.res-a.res;
+
+  Object.keys(users).forEach(uid => {
+    const gid = users[uid].groupId || 'bolao-inicial';
+    if (!groupEntries[gid]) groupEntries[gid] = [];
     const sc = calcRankScore(preds[uid], results, koMatches, bonusRes);
-    return { uid, name: users[uid].displayName||'Sem nome',
-             pts:sc.pts, exact:sc.exact, res:sc.res, filled:sc.filled };
+    const entry = { uid, name: users[uid].displayName||'Sem nome',
+                    pts:sc.pts, exact:sc.exact, res:sc.res, filled:sc.filled };
+    groupEntries[gid].push(entry);
+    allEntries.push(entry);
   });
-  entries.sort((a,b) => b.pts-a.pts || b.exact-a.exact || b.res-a.res);
+
+  // Ordenar cada grupo e o global
+  Object.keys(groupEntries).forEach(gid => groupEntries[gid].sort(sortFn));
+  allEntries.sort(sortFn);
+
+  // Montar objeto groups para Firestore
+  const groups = {};
+  Object.keys(groupEntries).forEach(gid => {
+    groups[gid] = {
+      entries: groupEntries[gid],
+      totalUsers: groupEntries[gid].length
+    };
+  });
 
   await db.doc('config/ranking').set({
-    entries,
-    totalUsers: entries.length,
+    entries: allEntries,       // ranking global (backward compat)
+    groups,                    // ranking por grupo
+    totalUsers: allEntries.length,
     updatedAt: admin.firestore.FieldValue.serverTimestamp(),
     calculatedAt: new Date().toISOString()
   });
-  console.log(`  ✓ Ranking: ${entries.length} participantes · 1º ${entries[0]?.name} (${entries[0]?.pts}pts)`);
+
+  const top = allEntries[0];
+  console.log(`  ✓ Ranking: ${allEntries.length} total · ${Object.keys(groups).length} grupo(s) · 1º ${top?.name} (${top?.pts}pts)`);
+  Object.keys(groups).forEach(gid => {
+    const g = groups[gid];
+    console.log(`    └ ${gid}: ${g.totalUsers} participantes · 1º ${g.entries[0]?.name||'—'} (${g.entries[0]?.pts||0}pts)`);
+  });
 }
 
-// ── Execução principal ─────────────────────────────────────────────────────
+// ── Execução principal ────────────────────────────────────────────────────
 syncLocks()
   .then(() => process.exit(0))
   .catch(e => {
     console.error('ERRO CRÍTICO:', e.message);
     process.exit(1);
+  });
   });

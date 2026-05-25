@@ -283,8 +283,14 @@ async function syncLocks() {
   console.log(`  ✓ Resultados: ${Object.keys(results).length}`);
   console.log(`  ✓ Concluído em ${Date.now()-now}ms`);
 
+  // ── FIX: ler bonusResults do Firestore (definido pelo admin no painel) ─
+  const wcSnap = await db.doc('config/wc').get();
+  const bonusResults = (wcSnap.exists && wcSnap.data().bonusResults)
+    ? wcSnap.data().bonusResults
+    : {};
+
   // Calcular ranking com os mesmos dados já lidos
-  await syncRanking(results, koMatches, wc.bonusResults||{});
+  await syncRanking(results, koMatches, bonusResults);
 }
 
 // ── Cálculo de ranking integrado (mesmos dados já carregados) ─────────────

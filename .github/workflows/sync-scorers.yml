@@ -1,0 +1,34 @@
+name: Sincronizar Artilheiros Copa 2026
+
+on:
+  schedule:
+    # Antes da Copa: 2x por dia (08h e 20h horário de Brasília = 11h e 23h UTC)
+    # Durante a Copa: a cada 3h (ajustar manualmente se necessário)
+    - cron: '0 11 * * *'
+    - cron: '0 23 * * *'
+  workflow_dispatch:
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repositorio
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Instalar dependencias
+        run: npm install firebase-admin
+        working-directory: scripts
+
+      - name: Sincronizar artilheiros
+        run: node scripts/sync-scorers.js
+        env:
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+          FIREBASE_PROJECT_ID: ${{ secrets.FIREBASE_PROJECT_ID }}
+          API_FOOTBALL_KEY: ${{ secrets.API_FOOTBALL_KEY }}
+          API_FOOTBALL_LEAGUE: '1'
+          API_FOOTBALL_SEASON: '2026'

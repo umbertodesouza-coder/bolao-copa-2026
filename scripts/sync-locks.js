@@ -281,7 +281,7 @@ async function syncRanking(results, koMatches, bonusRes) {
     const sc = calcRankScore(preds[uid], results, koMatches, bonusRes);
     const entry = { uid, name: users[uid].displayName||'Sem nome',
                     pts:sc.pts, exact:sc.exact, res:sc.res, filled:sc.filled,
-                    paid: isPaid };
+                    paid: isPaid===true };
 
     allEntriesIncludingUnpaid.push(entry);
 

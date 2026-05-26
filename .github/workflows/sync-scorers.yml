@@ -3,7 +3,7 @@ name: Sincronizar Artilheiros Copa 2026
 on:
   schedule:
     # Antes da Copa: 2x por dia (08h e 20h horário de Brasília = 11h e 23h UTC)
-    # Durante a Copa: a cada 3h (ajustar manualmente se necessário)
+    # Durante a Copa: aumentar para a cada 3h editando as linhas abaixo
     - cron: '0 11 * * *'
     - cron: '0 23 * * *'
   workflow_dispatch:
@@ -28,7 +28,7 @@ jobs:
         run: node scripts/sync-scorers.js
         env:
           FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
-          FIREBASE_PROJECT_ID: ${{ secrets.FIREBASE_PROJECT_ID }}
-          API_FOOTBALL_KEY: ${{ secrets.API_FOOTBALL_KEY }}
-          API_FOOTBALL_LEAGUE: '1'
-          API_FOOTBALL_SEASON: '2026'
+          FIREBASE_PROJECT_ID:      ${{ secrets.FIREBASE_PROJECT_ID }}
+          API_FOOTBALL_KEY:         ${{ secrets.API_FOOTBALL_KEY }}
+          API_FOOTBALL_LEAGUE:      '1'
+          API_FOOTBALL_SEASON:      '2026'

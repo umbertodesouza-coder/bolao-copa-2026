@@ -1,7 +1,7 @@
 /**
  * Bolão Copa 2026 — Sincronizador automático
  * GitHub Actions — roda a cada 5 minutos
- * v2 — Multi-grupo: ranking calculado por grupo + global
+ * v3 — Pagamento: só usuários com paid:true aparecem no ranking
  */
 
 const admin = require('firebase-admin');
@@ -106,10 +106,10 @@ function validateData(data, stats) {
   const warnings = [];
   if (!data || !data.matches) { warnings.push('JSON sem campo "matches"'); return warnings; }
   if (data.matches.length === 0) { warnings.push('Campo "matches" está vazio'); return warnings; }
-  if (stats.groupMatches === 0) warnings.push('Nenhum jogo de grupo encontrado — verifique o formato do JSON');
-  if (stats.groupMatches < 72 && stats.groupMatches > 0) warnings.push(`Apenas ${stats.groupMatches}/72 jogos de grupo encontrados`);
+  if (stats.groupMatches === 0) warnings.push('Nenhum jogo de grupo encontrado');
+  if (stats.groupMatches < 72 && stats.groupMatches > 0) warnings.push(`Apenas ${stats.groupMatches}/72 jogos encontrados`);
   if (stats.unknownTeams.length > 0) warnings.push(`Times não reconhecidos: ${stats.unknownTeams.slice(0,5).join(', ')}`);
-  if (stats.roundFormats.mixed) warnings.push(`Formato misto de rounds detectado (string + objeto)`);
+  if (stats.roundFormats.mixed) warnings.push(`Formato misto de rounds detectado`);
   if (stats.koMatches > 0 && stats.koPhasesMissing.length > 0) warnings.push(`Fases KO sem mapeamento: ${stats.koPhasesMissing.join(', ')}`);
   return warnings;
 }
@@ -117,37 +117,29 @@ function validateData(data, stats) {
 async function syncLocks() {
   const WC_URL = 'https://raw.githubusercontent.com/openfootball/worldcup.json/master/2026/worldcup.json';
   const now = Date.now();
-  const syncStart = new Date().toISOString();
+  console.log(`[${new Date().toISOString()}] Iniciando sincronização...`);
 
-  console.log(`[${syncStart}] Iniciando sincronização...`);
-
-  let data, fetchError = null;
+  let data;
   try {
     const res = await fetch(`${WC_URL}?t=${now}`);
-    if (!res.ok) throw new Error(`HTTP ${res.status} ${res.statusText}`);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
     data = await res.json();
   } catch (e) {
-    fetchError = e.message;
-    console.error('Erro ao buscar dados:', fetchError);
+    console.error('Erro ao buscar dados:', e.message);
     await db.doc('config/wc').set({
       lastSync: admin.firestore.FieldValue.serverTimestamp(),
-      syncStatus: 'error', syncError: fetchError,
-      syncMessage: `Falha ao buscar openfootball: ${fetchError}`
+      syncStatus: 'error', syncError: e.message,
+      syncMessage: `Falha ao buscar openfootball: ${e.message}`
     }, { merge: true });
     return;
   }
 
   const lt = {}, results = {}, koMatches = [];
   const roundCtrs = {};
-  const stats = {
-    groupMatches: 0, koMatches: 0,
-    unknownTeams: [], roundFormats: {string:0, object:0, mixed:false},
-    koPhasesMissing: []
-  };
+  const stats = { groupMatches:0, koMatches:0, unknownTeams:[], roundFormats:{string:0,object:0,mixed:false}, koPhasesMissing:[] };
 
   for (const m of (data.matches || [])) {
     const lockTime = parseMT(m.date, m.time);
-
     if (m.group) {
       const mid = findMid(m.team1, m.team2);
       if (!mid) {
@@ -158,18 +150,15 @@ async function syncLocks() {
       if (lockTime) lt[mid] = lockTime;
       if (m.score?.ft?.length === 2) results[mid] = { h: String(m.score.ft[0]), a: String(m.score.ft[1]) };
       stats.groupMatches++;
-
     } else if (m.round !== undefined) {
       const rawRound = m.round;
       if (typeof rawRound === 'string') stats.roundFormats.string++;
       else if (typeof rawRound === 'object') stats.roundFormats.object++;
       if (stats.roundFormats.string > 0 && stats.roundFormats.object > 0) stats.roundFormats.mixed = true;
-
       const rname = parseRoundName(rawRound);
       const phase = ROUND_MAP[rname] || ROUND_MAP[rname.replace(/\s+/g,' ')];
       if (!phase) {
         if (!stats.koPhasesMissing.includes(rname)) stats.koPhasesMissing.push(rname);
-        console.warn(`  Round não mapeado: "${rname}"`);
         continue;
       }
       if (!roundCtrs[phase]) roundCtrs[phase] = 0;
@@ -180,73 +169,54 @@ async function syncLocks() {
       const ksc = m.score?.ft?.length === 2 ? { h: String(m.score.ft[0]), a: String(m.score.ft[1]) } : null;
       if (lockTime) lt[kid] = lockTime;
       if (ksc) results[kid] = ksc;
-      koMatches.push({
-        id: kid, phase, date: m.date || null, lt: lockTime || null,
-        t1, t2, score: ksc,
-        known: !tbd(t1) && !tbd(t2) && Date.now() >= new Date('2026-06-27T00:00:00Z').getTime()
-      });
+      koMatches.push({ id:kid, phase, date:m.date||null, lt:lockTime||null, t1, t2, score:ksc,
+        known: !tbd(t1) && !tbd(t2) && Date.now() >= new Date('2026-06-27T00:00:00Z').getTime() });
       stats.koMatches++;
     }
   }
 
   const lockedMatches = Object.keys(lt).filter(mid => !mid.includes('_') && lt[mid] <= now);
   const koLockedMatches = Object.keys(lt).filter(mid => mid.includes('_') && lt[mid] <= now);
-
   const groupLockTimes = {};
   GK.forEach(g => {
     const gTimes = [0,1,2,3,4,5].map(i => lt[g+i]).filter(Boolean);
     if (gTimes.length > 0) groupLockTimes[g] = admin.firestore.Timestamp.fromMillis(Math.min(...gTimes));
   });
-
   const allGroupTimes = Object.values(groupLockTimes);
-  const firstMatchTime = allGroupTimes.length > 0
-    ? allGroupTimes.reduce((a,b) => a.toMillis()<b.toMillis()?a:b) : null;
+  const firstMatchTime = allGroupTimes.length > 0 ? allGroupTimes.reduce((a,b) => a.toMillis()<b.toMillis()?a:b) : null;
 
   const warnings = validateData(data, stats);
   const status = warnings.length === 0 ? 'ok' : 'warning';
-
   const wcData = {
     lt, results, lockedMatches, koLockedMatches, groupLockTimes, koMatches,
     lastSync: admin.firestore.FieldValue.serverTimestamp(),
     syncStatus: status, syncError: null,
     syncMessage: warnings.length > 0 ? warnings.join(' | ') : null,
-    syncStats: {
-      groupMatches: stats.groupMatches, koMatches: stats.koMatches,
-      lockedCount: lockedMatches.length, koLockedCount: koLockedMatches.length,
-      warnings: warnings
-    }
+    syncStats: { groupMatches:stats.groupMatches, koMatches:stats.koMatches,
+      lockedCount:lockedMatches.length, koLockedCount:koLockedMatches.length, warnings }
   };
   if (firstMatchTime) wcData.firstMatchTime = firstMatchTime;
-
   await db.doc('config/wc').set(wcData, { merge: true });
 
   console.log(`  ✓ Status: ${status}`);
-  if (warnings.length > 0) warnings.forEach(w => console.warn(`  ⚠ ${w}`));
   console.log(`  ✓ Grupos: ${stats.groupMatches}/72 | KO: ${stats.koMatches}`);
   console.log(`  ✓ Travados: ${lockedMatches.length} grupo | ${koLockedMatches.length} KO`);
   console.log(`  ✓ Resultados: ${Object.keys(results).length}`);
   console.log(`  ✓ Concluído em ${Date.now()-now}ms`);
 
-  // Ler bonusResults do Firestore (definido pelo admin no painel)
   const wcSnap = await db.doc('config/wc').get();
   const bonusResults = (wcSnap.exists && wcSnap.data().bonusResults) ? wcSnap.data().bonusResults : {};
-
-  // Calcular ranking com os dados já lidos
   await syncRanking(results, koMatches, bonusResults);
 }
 
-// ── Cálculo de ranking integrado ──────────────────────────────────────────
+// ── Pontuação ─────────────────────────────────────────────────────────────
 const PH_SCORE = {
   group:{r:1,e:3}, r32:{r:2,e:6}, r16:{r:4,e:12},
   qf:{r:8,e:24}, sf:{r:16,e:48}, tp:{r:16,e:48}, final:{r:32,e:96}
 };
 const BF_PTS = { champion:10, runnerup:6, scorer:5 };
-
 const ALL_MIDS = [];
-GK.forEach(g => {
-  const mx = getMx(GD[g]);
-  mx.forEach((_, i) => ALL_MIDS.push(g + i));
-});
+GK.forEach(g => { getMx(GD[g]).forEach((_, i) => ALL_MIDS.push(g + i)); });
 
 function scoreMR(p, r, phase) {
   if (!p || !r || p.h === '' || r.h === '' || p.h == null || r.h == null) return -1;
@@ -285,62 +255,75 @@ function calcRankScore(pred, results, koMatches, bonusRes) {
 
 async function syncRanking(results, koMatches, bonusRes) {
   console.log('  Calculando ranking...');
-  const [usersSnap, predsSnap] = await Promise.all([
+  const [usersSnap, predsSnap, paymentsSnap] = await Promise.all([
     db.collection('users').get(),
-    db.collection('predictions').get()
+    db.collection('predictions').get(),
+    db.collection('payments').get()   // ← lê pagamentos
   ]);
-  const users = {}, preds = {};
+
+  const users = {}, preds = {}, payments = {};
   usersSnap.forEach(d => { users[d.id] = d.data(); });
   predsSnap.forEach(d => { preds[d.id] = d.data(); });
+  paymentsSnap.forEach(d => { payments[d.id] = d.data(); });
 
-  // Agrupar usuários por groupId
+  const sortFn = (a,b) => b.pts-a.pts || b.exact-a.exact || b.res-a.res;
+
+  // Agrupar por groupId
   const groupEntries = {};
   const allEntries = [];
-  const sortFn = (a,b) => b.pts-a.pts || b.exact-a.exact || b.res-a.res;
+  const allEntriesIncludingUnpaid = []; // para o admin ver todos
 
   Object.keys(users).forEach(uid => {
     const gid = users[uid].groupId || 'bolao-inicial';
-    if (!groupEntries[gid]) groupEntries[gid] = [];
+    const pay = payments[uid];
+    const isPaid = pay && pay.status === 'approved';
+
     const sc = calcRankScore(preds[uid], results, koMatches, bonusRes);
     const entry = { uid, name: users[uid].displayName||'Sem nome',
-                    pts:sc.pts, exact:sc.exact, res:sc.res, filled:sc.filled };
-    groupEntries[gid].push(entry);
-    allEntries.push(entry);
+                    pts:sc.pts, exact:sc.exact, res:sc.res, filled:sc.filled,
+                    paid: isPaid };
+
+    allEntriesIncludingUnpaid.push(entry);
+
+    // Só entra no ranking público se pagou
+    if (isPaid) {
+      if (!groupEntries[gid]) groupEntries[gid] = [];
+      groupEntries[gid].push(entry);
+      allEntries.push(entry);
+    }
   });
 
-  // Ordenar cada grupo e o global
   Object.keys(groupEntries).forEach(gid => groupEntries[gid].sort(sortFn));
   allEntries.sort(sortFn);
+  allEntriesIncludingUnpaid.sort(sortFn);
 
-  // Montar objeto groups para Firestore
   const groups = {};
   Object.keys(groupEntries).forEach(gid => {
-    groups[gid] = {
-      entries: groupEntries[gid],
-      totalUsers: groupEntries[gid].length
-    };
+    groups[gid] = { entries: groupEntries[gid], totalUsers: groupEntries[gid].length };
   });
 
+  // Estatísticas de pagamento
+  const totalUsers = Object.keys(users).length;
+  const totalPaid = allEntries.length;
+
   await db.doc('config/ranking').set({
-    entries: allEntries,       // ranking global (backward compat)
-    groups,                    // ranking por grupo
-    totalUsers: allEntries.length,
+    entries: allEntries,              // ranking público (só pagos)
+    entriesAll: allEntriesIncludingUnpaid, // admin vê todos
+    groups,
+    totalUsers, totalPaid,
     updatedAt: admin.firestore.FieldValue.serverTimestamp(),
     calculatedAt: new Date().toISOString()
   });
 
   const top = allEntries[0];
-  console.log(`  ✓ Ranking: ${allEntries.length} total · ${Object.keys(groups).length} grupo(s) · 1º ${top?.name} (${top?.pts}pts)`);
+  console.log(`  ✓ Ranking: ${totalPaid} pagos / ${totalUsers} total`);
+  console.log(`  ✓ 1º lugar: ${top?.name||'—'} (${top?.pts||0}pts)`);
   Object.keys(groups).forEach(gid => {
     const g = groups[gid];
-    console.log(`    └ ${gid}: ${g.totalUsers} participantes · 1º ${g.entries[0]?.name||'—'} (${g.entries[0]?.pts||0}pts)`);
+    console.log(`    └ ${gid}: ${g.totalUsers} pagos · 1º ${g.entries[0]?.name||'—'} (${g.entries[0]?.pts||0}pts)`);
   });
 }
 
-// ── Execução principal ────────────────────────────────────────────────────
 syncLocks()
   .then(() => process.exit(0))
-  .catch(e => {
-    console.error('ERRO CRÍTICO:', e.message);
-    process.exit(1);
-  });
+  .catch(e => { console.error('ERRO CRÍTICO:', e.message); process.exit(1); });

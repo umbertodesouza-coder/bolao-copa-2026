@@ -285,10 +285,12 @@ async function syncRanking(results, koMatches, bonusRes) {
 
     allEntriesIncludingUnpaid.push(entry);
 
-    // Todos entram no ranking público
-    if (!groupEntries[gid]) groupEntries[gid] = [];
-    groupEntries[gid].push(entry);
-    allEntries.push(entry);
+    // Só pagos entram no ranking público
+    if (isPaid) {
+      if (!groupEntries[gid]) groupEntries[gid] = [];
+      groupEntries[gid].push(entry);
+      allEntries.push(entry);
+    }
   });
 
   Object.keys(groupEntries).forEach(gid => groupEntries[gid].sort(sortFn));
@@ -297,7 +299,7 @@ async function syncRanking(results, koMatches, bonusRes) {
 
   const groups = {};
   Object.keys(groupEntries).forEach(gid => {
-    groups[gid] = { entries: groupEntries[gid], totalUsers: groupEntries[gid].length, totalPaid: groupEntries[gid].length };
+    groups[gid] = { entries: groupEntries[gid], totalUsers: groupEntries[gid].length, totalPaid: groupEntries[gid].length }; // só pagos
   });
 
   // Estatísticas de pagamento
@@ -322,9 +324,6 @@ async function syncRanking(results, koMatches, bonusRes) {
   });
 }
 
-syncLocks()
-  .then(() => process.exit(0))
-  .catch(e => { console.error('ERRO CRÍTICO:', e.message); process.exit(1); });
 syncLocks()
   .then(() => process.exit(0))
   .catch(e => { console.error('ERRO CRÍTICO:', e.message); process.exit(1); });

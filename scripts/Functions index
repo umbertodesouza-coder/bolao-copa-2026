@@ -1,0 +1,171 @@
+/**
+ * Bolão Copa 2026 — Cloud Function
+ * Webhook do Mercado Pago + criação de preferência de pagamento
+ */
+
+const { onRequest } = require("firebase-functions/v2/https");
+const { setGlobalOptions } = require("firebase-functions/v2");
+const admin = require("firebase-admin");
+const crypto = require("crypto");
+
+admin.initializeApp();
+const db = admin.firestore();
+
+setGlobalOptions({ maxInstances: 10, region: "southamerica-east1" });
+const VALOR_BOLAO = 50.00;
+
+// ── 1. Criar preferência de pagamento ─────────────────────────────────────
+exports.criarPagamento = onRequest({ cors: true, secrets: ["MP_ACCESS_TOKEN"] }, async (req, res) => {
+  const MP_ACCESS_TOKEN = process.env.MP_ACCESS_TOKEN;
+
+  if (req.method !== "POST") return res.status(405).send("Method Not Allowed");
+
+  // Validar Firebase Auth token
+  const authHeader = req.headers.authorization || "";
+  const idToken = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : null;
+  if (!idToken) return res.status(401).json({ error: "Token de autenticação ausente" });
+
+  let verifiedUid;
+  try {
+    const decoded = await admin.auth().verifyIdToken(idToken);
+    verifiedUid = decoded.uid;
+  } catch (e) {
+    return res.status(401).json({ error: "Token inválido ou expirado" });
+  }
+
+  const { nome, email } = req.body;
+  if (!nome || !email) {
+    return res.status(400).json({ error: "nome e email são obrigatórios" });
+  }
+
+  // Buscar groupId do Firestore — não confiar no body
+  let groupId = "bolao-inicial";
+  try {
+    const userDoc = await db.doc("users/" + verifiedUid).get();
+    if (userDoc.exists) groupId = userDoc.data().groupId || "bolao-inicial";
+  } catch (e) { /* usa default */ }
+
+  const uid = verifiedUid;
+
+  try {
+    const response = await fetch("https://api.mercadopago.com/checkout/preferences", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": "Bearer " + MP_ACCESS_TOKEN
+      },
+      body: JSON.stringify({
+        items: [{
+          title: "Copa da Galera 2026",
+          quantity: 1,
+          unit_price: VALOR_BOLAO,
+          currency_id: "BRL"
+        }],
+        payer: { name: nome, email: email },
+        external_reference: uid,
+        notification_url: "https://webhookpagamento-34a44c7hya-rj.a.run.app",
+        back_urls: {
+          success: "https://copadagalera.com.br/?pagamento=sucesso",
+          failure: "https://copadagalera.com.br/?pagamento=falhou",
+          pending: "https://copadagalera.com.br/?pagamento=pendente"
+        },
+        auto_return: "approved",
+        payment_methods: {
+          excluded_payment_types: [{ id: "ticket" }],
+          installments: 1
+        }
+      })
+    });
+
+    const data = await response.json();
+    if (!data.init_point) {
+      console.error("Erro MP:", data);
+      return res.status(500).json({ error: "Erro ao criar preferência", detail: data });
+    }
+
+    await db.doc("payments/" + uid).set({
+      preferenceId: data.id,
+      status: "pending",
+      valor: VALOR_BOLAO,
+      groupId: groupId,
+      nome, email,
+      createdAt: admin.firestore.FieldValue.serverTimestamp()
+    }, { merge: true });
+
+    return res.json({ init_point: data.init_point, preference_id: data.id });
+
+  } catch (e) {
+    console.error("criarPagamento erro:", e);
+    return res.status(500).json({ error: e.message });
+  }
+});
+
+// ── 2. Webhook do Mercado Pago ─────────────────────────────────────────────
+exports.webhookPagamento = onRequest({ cors: false, secrets: ["MP_ACCESS_TOKEN", "MP_WEBHOOK_SECRET"] }, async (req, res) => {
+  const MP_ACCESS_TOKEN    = process.env.MP_ACCESS_TOKEN;
+  const MP_WEBHOOK_SECRET  = process.env.MP_WEBHOOK_SECRET;
+
+  if (req.method === "GET") return res.status(200).send("OK");
+  if (req.method !== "POST") return res.status(405).send("Method Not Allowed");
+
+  try {
+    const body = req.body;
+
+    // ── Validar assinatura do Mercado Pago ──────────────────────────────
+    const xSig   = req.headers['x-signature'];
+    const xReqId = req.headers['x-request-id'];
+    if (xSig && xReqId && body.data?.id) {
+      const ts = xSig.split(',').find(p => p.startsWith('ts='))?.split('=')[1];
+      const v1 = xSig.split(',').find(p => p.startsWith('v1='))?.split('=')[1];
+      if (ts && v1) {
+        const manifest = `id:${body.data.id};request-id:${xReqId};ts:${ts};`;
+        const hmac = crypto.createHmac('sha256', MP_WEBHOOK_SECRET)
+                           .update(manifest).digest('hex');
+        if (hmac !== v1) {
+          console.warn('Assinatura MP inválida — possível ataque');
+          return res.status(401).send('Unauthorized');
+        }
+      }
+    }
+    // ───────────────────────────────────────────────────────────────────
+
+    console.log("Webhook recebido:", JSON.stringify(body));
+
+    if (body.type !== "payment") return res.status(200).send("OK");
+
+    const paymentId = body.data && body.data.id;
+    if (!paymentId) return res.status(200).send("OK");
+
+    const mpRes = await fetch("https://api.mercadopago.com/v1/payments/" + paymentId, {
+      headers: { "Authorization": "Bearer " + MP_ACCESS_TOKEN }
+    });
+    const payment = await mpRes.json();
+
+    console.log("Pagamento status:", payment.status, "ref:", payment.external_reference);
+
+    if (payment.status !== "approved") return res.status(200).send("OK");
+
+    const uid = payment.external_reference;
+    if (!uid) return res.status(200).send("OK");
+
+    await db.doc("payments/" + uid).set({
+      status: "approved",
+      paymentId: String(paymentId),
+      valor: payment.transaction_amount,
+      paymentMethod: payment.payment_type_id,
+      approvedAt: admin.firestore.FieldValue.serverTimestamp()
+    }, { merge: true });
+
+    await db.doc("users/" + uid).set({
+      paid: true,
+      paidAt: admin.firestore.FieldValue.serverTimestamp()
+    }, { merge: true });
+
+    console.log("Pagamento aprovado para uid:", uid);
+    return res.status(200).send("OK");
+
+  } catch (e) {
+    console.error("webhookPagamento erro:", e);
+    return res.status(500).send("Error");
+  }
+});

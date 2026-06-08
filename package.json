@@ -1,0 +1,8 @@
+{
+  "name": "bolao-copa-2026",
+  "version": "1.0.0",
+  "description": "Bolão Copa da Galera 2026 - Sync scripts",
+  "dependencies": {
+    "firebase-admin": "12"
+  }
+}

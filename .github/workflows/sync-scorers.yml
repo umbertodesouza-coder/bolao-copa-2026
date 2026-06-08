@@ -22,7 +22,5 @@ jobs:
           FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
           FIREBASE_PROJECT_ID: copa-do-mundo-3c309
           API_FOOTBALL_KEY: ${{ secrets.API_FOOTBALL_KEY }}
-          API_FOOTBALL_LEAGUE: ${{ secrets.API_FOOTBALL_LEAGUE || '1' }}
-          API_FOOTBALL_SEASON: ${{ secrets.API_FOOTBALL_SEASON || '2026' }}
-          API_FOOTBALL_LEAGUE:      '1'
-          API_FOOTBALL_SEASON:      '2026'
+          API_FOOTBALL_LEAGUE: "1"
+          API_FOOTBALL_SEASON: "2026"

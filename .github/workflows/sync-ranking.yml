@@ -1,27 +1,21 @@
 name: Ranking Consolidado - Copa 2026
-
 on:
   schedule:
-    - cron: '*/15 * * * *'  # A cada 15 minutos para teste
-  workflow_dispatch:          # Permite rodar manualmente
-
+    - cron: '*/30 * * * *'
+  workflow_dispatch:
 jobs:
   ranking:
     runs-on: ubuntu-latest
     timeout-minutes: 3
-
     steps:
       - name: Checkout repositorio
         uses: actions/checkout@v4
-
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 22
-
       - name: Instalar dependencias
-        run: npm install firebase-admin
-
+        run: npm install
       - name: Calcular ranking
         run: node scripts/sync-ranking.js
         env:

@@ -96,10 +96,12 @@ async function fetchESPN(dateStr) {
 
 async function fetchAllMatches() {
   // Copa: 11/jun a 19/jul de 2026
+  // Consulta passado (resultados) + futuro (horários dos jogos)
   const start = new Date('2026-06-11');
   const end   = new Date('2026-07-20');
   const today = new Date();
-  const until = end < today ? end : today;
+  const future = new Date(today.getTime() + 21 * 24 * 60 * 60 * 1000); // +21 dias
+  const until = end < future ? end : future;
 
   const allEvents = [];
   for (let d = new Date(start); d <= until; d.setDate(d.getDate()+1)) {
@@ -313,7 +315,3 @@ async function syncLocks() {
 syncLocks()
   .then(()=>process.exit(0))
   .catch(e=>{console.error('ERRO CRÍTICO:',e.message);process.exit(1);});
-
-syncLocks()
-  .then(() => process.exit(0))
-  .catch(e => { console.error('ERRO CRÍTICO:', e.message); process.exit(1); });

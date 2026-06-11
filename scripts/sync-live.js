@@ -57,21 +57,20 @@ function formatMatchTime(dateStr) {
   return isToday ? `⏰ Hoje · ${timeStr}` : `📅 ${day}/${month} · ${timeStr}`;
 }
 
-function statusLabel(state, detail, clock, matchDate) {
+function statusLabel(state, detail, clock, matchDate, period) {
   if (state === 'in') {
     const d = (detail || '').toLowerCase();
-    // Intervalo
+    // Intervalo normal
     if (d === 'halftime' || d === 'half time' || d === 'ht' || d === 'half') return '⏸ Intervalo';
     // Intervalo prorrogação
     if (d.includes('end of extra') || d.includes('extra time half')) return '⏸ Int. Prorrogação';
     // Pênaltis
     if (d.includes('penalty') || d.includes('penalties') || d.includes('shootout') || d.includes('pso')) return '⚽ Pênaltis';
-    // Prorrogação
-    if (d.includes('extra') || d.includes('overtime') || d.includes('et') || d.includes('ot')) return '⏱ Prorrogação ' + (clock || '').trim();
-    // Segundo tempo
-    if (d.includes('2nd') || d.includes('second')) return '🔴 2T ' + (clock || '').trim();
-    // Primeiro tempo (padrão)
-    return '🔴 1T ' + (clock || '').trim();
+    // Prorrogação (period >= 3 ou keyword)
+    if (period >= 3 || d.includes('extra') || d.includes('overtime')) return '⏱ Prorrogação ' + (clock || '').trim();
+    // Usa period da ESPN para 1T/2T (mais confiável que o texto)
+    const t = period === 2 ? '2T' : '1T';
+    return '🔴 ' + t + ' ' + (clock || '').trim();
   }
   if (state === 'post') return '✅ Encerrado';
   return formatMatchTime(matchDate);
@@ -133,8 +132,9 @@ async function syncLive() {
       homeScore,
       awayScore,
       state,
+      period:      comp.status?.period || 1,
       clock:       status?.displayClock || '',
-      statusLabel: statusLabel(state, status?.type?.shortDetail, status?.displayClock, ev.date),
+      statusLabel: statusLabel(state, status?.type?.shortDetail, status?.displayClock, ev.date, comp.status?.period || 1),
       isLive:      state === 'in',
       isFinished:  state === 'post',
       date:        ev.date,

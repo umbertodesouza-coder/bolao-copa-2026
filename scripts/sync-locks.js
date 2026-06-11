@@ -245,7 +245,7 @@ async function syncLocks() {
     const t1     = teamName(home.team?.displayName||home.team?.name||'');
     const t2     = teamName(away.team?.displayName||away.team?.name||'');
     const lockTs = new Date(ev.date).getTime();
-    const isPost = state==='post';
+    const isPost = state==='post' || state==='in'; // ao vivo + final
     const score  = (isPost&&home.score!=null) ? {h:String(home.score),a:String(away.score)} : null;
 
     // ── Fase de grupos ──────────────────────────────────────────────────
@@ -255,6 +255,11 @@ async function syncLocks() {
       if (score)  results[mid] = score;
       groupCount++;
       continue;
+    }
+
+    // Log de diagnóstico — times não mapeados (podem ser fase de grupos faltando)
+    if (state === 'pre' || state === 'post' || state === 'in') {
+      console.log(`  [DIAGNÓSTICO] Não mapeado: "${t1}" x "${t2}" (state=${state}, date=${ev.date?.slice(0,10)})`);
     }
 
     // ── Mata-mata ───────────────────────────────────────────────────────

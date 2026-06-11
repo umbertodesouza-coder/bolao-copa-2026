@@ -153,5 +153,3 @@ async function syncLive() {
 syncLive()
   .then(() => process.exit(0))
   .catch(e => { console.error('ERRO:', e.message); process.exit(1); });
-  .then(() => process.exit(0))
-  .catch(e => { console.error('ERRO:', e.message); process.exit(1); });

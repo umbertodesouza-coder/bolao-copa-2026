@@ -53,8 +53,8 @@ function formatMatchTime(dateStr) {
                   local.getUTCMonth() === today.getUTCMonth() &&
                   local.getUTCFullYear() === today.getUTCFullYear();
 
-  const timeStr = `${hours}h${mins === '00' ? '' : mins}`;
-  return isToday ? `⏰ ${timeStr}` : `📅 ${day}/${month} · ${timeStr}`;
+  const timeStr = `${hours}h${mins}`;
+  return isToday ? `⏰ Hoje · ${timeStr}` : `📅 ${day}/${month} · ${timeStr}`;
 }
 
 function statusLabel(state, detail, clock, matchDate) {

@@ -59,11 +59,22 @@ function formatMatchTime(dateStr) {
 
 function statusLabel(state, detail, clock, matchDate) {
   if (state === 'in') {
-    if (detail && detail.toLowerCase().includes('half')) return '⏸ Intervalo';
-    return '🔴 ' + (clock || detail || 'Ao Vivo');
+    const d = (detail || '').toLowerCase();
+    // Intervalo
+    if (d === 'halftime' || d === 'half time' || d === 'ht' || d === 'half') return '⏸ Intervalo';
+    // Intervalo prorrogação
+    if (d.includes('end of extra') || d.includes('extra time half')) return '⏸ Int. Prorrogação';
+    // Pênaltis
+    if (d.includes('penalty') || d.includes('penalties') || d.includes('shootout') || d.includes('pso')) return '⚽ Pênaltis';
+    // Prorrogação
+    if (d.includes('extra') || d.includes('overtime') || d.includes('et') || d.includes('ot')) return '⏱ Prorrogação ' + (clock || '').trim();
+    // Segundo tempo
+    if (d.includes('2nd') || d.includes('second')) return '🔴 2T ' + (clock || '').trim();
+    // Primeiro tempo (padrão)
+    return '🔴 1T ' + (clock || '').trim();
   }
   if (state === 'post') return '✅ Encerrado';
-  return formatMatchTime(matchDate); // ex: "⏰ 14h" ou "📅 11/06 · 17h"
+  return formatMatchTime(matchDate);
 }
 
 async function syncLive() {

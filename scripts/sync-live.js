@@ -116,14 +116,26 @@ async function syncLive() {
     const homeScore = home.score !== undefined ? String(home.score) : '-';
     const awayScore = away.score !== undefined ? String(away.score) : '-';
 
+    // IDs dos times para cruzar com o gol
+    const homeId = home.team?.id || '';
+    const awayId  = away.team?.id || '';
+
     const details = comp.details || [];
     const goals = details
       .filter(d => d.type?.text?.toLowerCase().includes('goal'))
-      .map(d => ({
-        team:   teamName(d.team?.displayName || ''),
-        player: d.athletesInvolved?.[0]?.displayName || '',
-        clock:  d.clock?.displayValue || ''
-      }));
+      .map(d => {
+        let teamStr = teamName(d.team?.displayName || d.team?.name || '');
+        // Se o nome veio vazio, tenta cruzar pelo ID
+        if (!teamStr && d.team?.id) {
+          if (String(d.team.id) === String(homeId)) teamStr = homeName;
+          else if (String(d.team.id) === String(awayId)) teamStr = awayName;
+        }
+        return {
+          team:   teamStr,
+          player: d.athletesInvolved?.[0]?.displayName || '',
+          clock:  d.clock?.displayValue || ''
+        };
+      });
 
     games.push({
       id: ev.id,

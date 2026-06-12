@@ -80,14 +80,25 @@ async function syncLive() {
   const now = Date.now();
   console.log(`[${new Date().toISOString()}] Sincronizando dados ao vivo...`);
 
-  let data;
+  // Datas de "hoje" e "ontem" em horário de Brasília (UTC-3)
+  // Busca os dois dias porque um jogo iniciado às 23h BRT pode
+  // ser classificado pela ESPN sob a data UTC seguinte
+  const BRT_OFFSET = -3 * 60 * 60 * 1000;
+  const nowBRT   = new Date(Date.now() + BRT_OFFSET);
+  const todayBRT = nowBRT.toISOString().slice(0,10).replace(/-/g,'');
+  const yestBRT  = new Date(nowBRT.getTime() - 24*60*60*1000).toISOString().slice(0,10).replace(/-/g,'');
+
+  let events = [];
   try {
-    const res = await fetch(
-      `https://site.api.espn.com/apis/site/v2/sports/soccer/FIFA.WORLD/scoreboard?dates=${new Date().toISOString().slice(0,10).replace(/-/g,'')}`,
-      { headers: { 'Accept': 'application/json' } }
-    );
-    if (!res.ok) throw new Error(`ESPN HTTP ${res.status}`);
-    data = await res.json();
+    for (const dateStr of [yestBRT, todayBRT]) {
+      const res = await fetch(
+        `https://site.api.espn.com/apis/site/v2/sports/soccer/FIFA.WORLD/scoreboard?dates=${dateStr}`,
+        { headers: { 'Accept': 'application/json' } }
+      );
+      if (!res.ok) throw new Error(`ESPN HTTP ${res.status} (${dateStr})`);
+      const data = await res.json();
+      events.push(...(data.events || []));
+    }
   } catch (e) {
     console.error('Erro ESPN:', e.message);
     await db.doc('config/live').set({
@@ -98,8 +109,32 @@ async function syncLive() {
     return;
   }
 
+  // Remover duplicados (mesmo jogo pode vir nas duas datas)
+  const seenIds = new Set();
+  events = events.filter(ev => {
+    if (seenIds.has(ev.id)) return false;
+    seenIds.add(ev.id);
+    return true;
+  });
+
+  // Filtrar: manter apenas jogos de "hoje BRT" + jogos ao vivo/recém-encerrados de "ontem BRT"
+  const TWO_HOURS = 2 * 60 * 60 * 1000;
+  events = events.filter(ev => {
+    const comp  = ev.competitions?.[0];
+    const state = comp?.status?.type?.state || 'pre';
+    const evDateBRT = new Date(new Date(ev.date).getTime() + BRT_OFFSET).toISOString().slice(0,10).replace(/-/g,'');
+
+    if (evDateBRT === todayBRT) return true;
+    // Jogo de "ontem BRT": só mantém se ainda ao vivo ou terminou há pouco
+    if (state === 'in') return true;
+    if (state === 'post') {
+      const elapsed = Date.now() - new Date(ev.date).getTime();
+      return elapsed < TWO_HOURS + (3*60*60*1000); // até ~2h após o fim (considerando ~2h de jogo)
+    }
+    return false;
+  });
+
   const games = [];
-  const events = data.events || [];
 
   for (const ev of events) {
     const comp = ev.competitions?.[0];

@@ -21,7 +21,7 @@ const ESPN_TM = {
   'Bosnia and Herzegovina':'Bosnia','Bosnia & Herzegovina':'Bosnia',
   'Brazil':'Brasil','Morocco':'Marrocos','Scotland':'Escocia','Haiti':'Haiti',
   'United States':'EUA','USA':'EUA','Paraguay':'Paraguai','Turkey':'Turquia',
-  'Turkiye':'Turquia','Australia':'Australia','Germany':'Alemanha',
+  'Turkiye':'Turquia','Türkiye':'Turquia','Australia':'Australia','Germany':'Alemanha',
   'Ecuador':'Equador','Ivory Coast':'Costa do Marfim','Curaçao':'Curacao',
   'Netherlands':'Holanda','Japan':'Japao','Sweden':'Suecia','Tunisia':'Tunisia',
   'Belgium':'Belgica','Iran':'Ira','Egypt':'Egito','New Zealand':'Nova Zelandia',
@@ -29,7 +29,7 @@ const ESPN_TM = {
   'Cape Verde':'Cabo Verde','France':'Franca','Senegal':'Senegal',
   'Norway':'Noruega','Iraq':'Iraque','Argentina':'Argentina','Austria':'Austria',
   'Algeria':'Algeria','Jordan':'Jordania','Portugal':'Portugal',
-  'Colombia':'Colombia','Uzbekistan':'Uzbequistao','DR Congo':'RD Congo',
+  'Colombia':'Colombia','Uzbekistan':'Uzbequistao','DR Congo':'RD Congo','Congo DR':'RD Congo',
   'England':'Inglaterra','Croatia':'Croacia','Ghana':'Gana','Panama':'Panama',
   'Korea Republic':'Coreia do Sul','Curacao':'Curacao'
 };

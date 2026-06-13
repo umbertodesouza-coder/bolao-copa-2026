@@ -112,7 +112,8 @@ function extractGoalsFromEvent(ev, comp) {
   return details
     .filter(d => {
       const t = (d.type?.text || '').toLowerCase();
-      return t.includes('goal') && !t.includes('own goal');
+      const isGoal = d.scoringPlay === true || t.includes('goal');
+      return isGoal && !t.includes('own goal');
     })
     .map(d => {
       let teamStr = countryName(d.team?.displayName || d.team?.name || '');

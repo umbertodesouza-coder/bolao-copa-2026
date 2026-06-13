@@ -110,7 +110,10 @@ function extractGoalsFromEvent(ev, comp) {
 
   const details = comp.details || [];
   return details
-    .filter(d => d.type?.text?.toLowerCase().includes('goal'))
+    .filter(d => {
+      const t = (d.type?.text || '').toLowerCase();
+      return t.includes('goal') && !t.includes('own goal');
+    })
     .map(d => {
       let teamStr = countryName(d.team?.displayName || d.team?.name || '');
       if (!teamStr && d.team?.id) {

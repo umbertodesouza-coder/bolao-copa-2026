@@ -252,7 +252,19 @@ async function syncLocks() {
     const mid = findMid(t1, t2);
     if (mid) {
       if (lockTs) lt[mid] = lockTs;
-      if (score)  results[mid] = score;
+      if (score) {
+        // Garante que o placar é salvo na ordem GD (não ESPN)
+        // GD define quem é "home" no bolão — ESPN pode ter ordem inversa
+        const gdGrp = mid.slice(0, mid.length - 1);
+        const gdIdx = parseInt(mid.slice(mid.length - 1));
+        const gdMatch = getMx(GD[gdGrp])[gdIdx];
+        if (gdMatch && t1 !== gdMatch.h) {
+          // ESPN tem home/away invertido vs GD — troca h e a
+          results[mid] = {h: score.a, a: score.h};
+        } else {
+          results[mid] = score;
+        }
+      }
       groupCount++;
       continue;
     }

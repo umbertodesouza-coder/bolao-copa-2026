@@ -157,7 +157,12 @@ async function syncLive() {
 
     const details = comp.details || [];
     const goals = details
-      .filter(d => d.scoringPlay === true || (d.type?.text || '').toLowerCase().includes('goal'))
+      .filter(d => {
+        const t = (d.type?.text || '').toLowerCase();
+        // Exclui cobranças da disputa de pênaltis (shootout) — não são "gols" do jogo
+        if (t.includes('shootout')) return false;
+        return d.scoringPlay === true || t.includes('goal');
+      })
       .map(d => {
         let teamStr = teamName(d.team?.displayName || d.team?.name || '');
         // Se o nome veio vazio, tenta cruzar pelo ID

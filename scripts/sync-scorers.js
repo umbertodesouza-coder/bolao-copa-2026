@@ -135,18 +135,23 @@ function extractGoalsFromEvent(ev, comp) {
     .filter(g => g.player);
 }
 
+// Acumulador 100% auto-recuperável: a cada execução, RECALCULA do zero os
+// gols de TODOS os jogos (encerrados e ao vivo) guardados por matchId.
+// Não existe "processado uma vez e travado" — se a ESPN completar/corrigir
+// comp.details depois (nome de jogador, pênalti, etc.), o próximo ciclo de
+// 4h já se autocorrige sozinho, sem precisar de script de fix manual.
 async function updateOwnAccumulator() {
   const accumRef = await db.doc('config/scorersAccum').get();
-  const accum = accumRef.exists ? accumRef.data() : { players: {}, processedMatches: [] };
-  accum.players = accum.players || {};
-  accum.processedMatches = accum.processedMatches || [];
+  const accum = accumRef.exists ? accumRef.data() : {};
+  accum.matchGoals = accum.matchGoals || {}; // jogos encerrados (state='post')
+  accum.liveGoals  = accum.liveGoals  || {}; // jogos em andamento (state='in')
 
   // Datas da Copa: 11/jun até hoje (BRT)
   const BRT_OFFSET = -3 * 60 * 60 * 1000;
   const start = new Date('2026-06-11T00:00:00Z');
   const todayBRT = new Date(Date.now() + BRT_OFFSET);
 
-  let newGoalsAdded = 0;
+  let postCount = 0, liveCount = 0;
   for (let d = new Date(start); d <= todayBRT; d.setDate(d.getDate()+1)) {
     const ds = d.toISOString().slice(0,10).replace(/-/g,'');
     let events;
@@ -160,47 +165,37 @@ async function updateOwnAccumulator() {
       const comp = ev.competitions?.[0];
       if (!comp) continue;
       const state = comp.status?.type?.state || 'pre';
-      if (state !== 'post' && state !== 'in') continue; // jogos em andamento ou encerrados
-
-      const goals = extractGoalsFromEvent(ev, comp);
+      const goals = extractGoalsFromEvent(ev, comp).map(g => ({ player: g.player, team: g.team }));
 
       if (state === 'post') {
-        // Jogo encerrado: processa definitivamente (uma única vez)
-        if (accum.processedMatches.includes(ev.id)) continue;
-        for (const gol of goals) {
-          const key = normName(gol.player) + '|' + normName(gol.team || '');
-          if (!accum.players[key]) accum.players[key] = { name: gol.player, country: gol.team || '', goals: 0 };
-          accum.players[key].goals++;
-          newGoalsAdded++;
-        }
-        accum.processedMatches.push(ev.id);
-      } else {
-        // Jogo ao vivo: recalcula a contagem "provisória" deste jogo a cada execução
-        accum.liveGoals = accum.liveGoals || {};
-        const prevLive = accum.liveGoals[ev.id] || {};
-        const newLive = {};
-        for (const gol of goals) {
-          const key = normName(gol.player) + '|' + normName(gol.team || '');
-          newLive[key] = (newLive[key]||0) + 1;
-          if (!accum.players[key]) accum.players[key] = { name: gol.player, country: gol.team || '', goals: 0 };
-        }
-        // Ajusta diferença entre contagem provisória anterior e atual
-        const allKeys = new Set([...Object.keys(prevLive), ...Object.keys(newLive)]);
-        allKeys.forEach(k => {
-          const diff = (newLive[k]||0) - (prevLive[k]||0);
-          if (diff !== 0) { accum.players[k].goals += diff; newGoalsAdded += Math.abs(diff); }
-        });
-        accum.liveGoals[ev.id] = newLive;
+        accum.matchGoals[ev.id] = goals; // sempre sobrescreve — sem trava permanente
+        delete accum.liveGoals[ev.id];   // não precisa mais da contagem provisória
+        postCount++;
+      } else if (state === 'in') {
+        accum.liveGoals[ev.id] = goals;
+        liveCount++;
       }
+      // 'pre': nada a fazer
     }
   }
 
-  if (newGoalsAdded > 0 || !accumRef.exists) {
-    await db.doc('config/scorersAccum').set(accum);
+  // Recalcula os totais por jogador do zero, a partir dos dados acima
+  const players = {};
+  function addGoals(goalsArr) {
+    (goalsArr || []).forEach(g => {
+      const key = normName(g.player) + '|' + normName(g.team || '');
+      if (!players[key]) players[key] = { name: g.player, country: g.team || '', goals: 0 };
+      players[key].goals++;
+    });
   }
-  console.log(`  ✓ Acumulador próprio: +${newGoalsAdded} gol(s) novo(s), ${accum.processedMatches.length} jogo(s) processado(s) no total`);
+  Object.values(accum.matchGoals).forEach(addGoals);
+  Object.values(accum.liveGoals).forEach(addGoals);
+  accum.players = players; // cache para inspeção manual no Firestore
 
-  return Object.values(accum.players);
+  await db.doc('config/scorersAccum').set(accum);
+  console.log(`  ✓ Acumulador próprio: ${postCount} jogo(s) encerrado(s) + ${liveCount} ao vivo recomputado(s), ${Object.keys(players).length} jogador(es)`);
+
+  return Object.values(players);
 }
 
 // ── 3) Mesclar ESPN + acumulador próprio ───────────────────────────────────

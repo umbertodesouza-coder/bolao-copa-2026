@@ -90,31 +90,84 @@ async function fetchEspnLeaders() {
   }
 }
 
-// ── 2) Acumulador próprio a partir de config/live ──────────────────────────
+// ── 2) Acumulador próprio — busca direto na ESPN (independente de config/live) ──
+// Extrai gols de partidas já encerradas, varrendo as datas da Copa até hoje (BRT)
+async function fetchEspnDay(dateStr) {
+  const url = `https://site.api.espn.com/apis/site/v2/sports/soccer/FIFA.WORLD/scoreboard?dates=${dateStr}&limit=100`;
+  const res = await fetch(url, { headers: { 'Accept': 'application/json' } });
+  if (!res.ok) throw new Error(`ESPN HTTP ${res.status} (${dateStr})`);
+  const data = await res.json();
+  return data.events || [];
+}
+
+function extractGoalsFromEvent(ev, comp) {
+  const home = comp.competitors?.find(c=>c.homeAway==='home');
+  const away = comp.competitors?.find(c=>c.homeAway==='away');
+  const homeId = home?.team?.id || '';
+  const awayId = away?.team?.id || '';
+  const homeName = countryName(home?.team?.displayName || home?.team?.name || '');
+  const awayName = countryName(away?.team?.displayName || away?.team?.name || '');
+
+  const details = comp.details || [];
+  return details
+    .filter(d => d.type?.text?.toLowerCase().includes('goal'))
+    .map(d => {
+      let teamStr = countryName(d.team?.displayName || d.team?.name || '');
+      if (!teamStr && d.team?.id) {
+        if (String(d.team.id) === String(homeId)) teamStr = homeName;
+        else if (String(d.team.id) === String(awayId)) teamStr = awayName;
+      }
+      let player = d.athletesInvolved?.[0]?.displayName
+                 || d.athletesInvolved?.[0]?.shortName
+                 || '';
+      if (!player && d.text) {
+        const m = d.text.match(/(?:Goal!?\s*[^.]*\.\s*)([A-Z][\wÀ-ÿ'\-]+(?:\s[A-Z][\wÀ-ÿ'\-]+)*)/);
+        if (m && m[1]) player = m[1].trim();
+      }
+      return { team: teamStr, player };
+    })
+    .filter(g => g.player);
+}
+
 async function updateOwnAccumulator() {
   const accumRef = await db.doc('config/scorersAccum').get();
   const accum = accumRef.exists ? accumRef.data() : { players: {}, processedMatches: [] };
   accum.players = accum.players || {};
   accum.processedMatches = accum.processedMatches || [];
 
-  const liveSnap = await db.doc('config/live').get();
-  const games = liveSnap.exists ? (liveSnap.data().games || []) : [];
+  // Datas da Copa: 11/jun até hoje (BRT)
+  const BRT_OFFSET = -3 * 60 * 60 * 1000;
+  const start = new Date('2026-06-11T00:00:00Z');
+  const todayBRT = new Date(Date.now() + BRT_OFFSET);
 
   let newGoalsAdded = 0;
-  for (const g of games) {
-    if (!g.isFinished) continue;             // só processa jogos encerrados
-    if (accum.processedMatches.includes(g.id)) continue; // já contabilizado
-    const goals = g.goals || [];
-    for (const gol of goals) {
-      if (!gol.player) continue;
-      const key = normName(gol.player) + '|' + normName(gol.team || '');
-      if (!accum.players[key]) {
-        accum.players[key] = { name: gol.player, country: gol.team || '', goals: 0 };
-      }
-      accum.players[key].goals++;
-      newGoalsAdded++;
+  for (let d = new Date(start); d <= todayBRT; d.setDate(d.getDate()+1)) {
+    const ds = d.toISOString().slice(0,10).replace(/-/g,'');
+    let events;
+    try {
+      events = await fetchEspnDay(ds);
+    } catch(e) {
+      console.warn(`  ESPN erro em ${ds}: ${e.message}`);
+      continue;
     }
-    accum.processedMatches.push(g.id);
+    for (const ev of events) {
+      const comp = ev.competitions?.[0];
+      if (!comp) continue;
+      const state = comp.status?.type?.state || 'pre';
+      if (state !== 'post') continue; // só jogos encerrados
+      if (accum.processedMatches.includes(ev.id)) continue;
+
+      const goals = extractGoalsFromEvent(ev, comp);
+      for (const gol of goals) {
+        const key = normName(gol.player) + '|' + normName(gol.team || '');
+        if (!accum.players[key]) {
+          accum.players[key] = { name: gol.player, country: gol.team || '', goals: 0 };
+        }
+        accum.players[key].goals++;
+        newGoalsAdded++;
+      }
+      accum.processedMatches.push(ev.id);
+    }
   }
 
   if (newGoalsAdded > 0 || !accumRef.exists) {

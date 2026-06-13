@@ -157,7 +157,7 @@ async function syncLive() {
 
     const details = comp.details || [];
     const goals = details
-      .filter(d => d.type?.text?.toLowerCase().includes('goal'))
+      .filter(d => d.scoringPlay === true || (d.type?.text || '').toLowerCase().includes('goal'))
       .map(d => {
         let teamStr = teamName(d.team?.displayName || d.team?.name || '');
         // Se o nome veio vazio, tenta cruzar pelo ID
@@ -165,9 +165,19 @@ async function syncLive() {
           if (String(d.team.id) === String(homeId)) teamStr = homeName;
           else if (String(d.team.id) === String(awayId)) teamStr = awayName;
         }
+        // Nome do jogador: tenta athletesInvolved primeiro
+        let player = d.athletesInvolved?.[0]?.displayName
+                   || d.athletesInvolved?.[0]?.shortName
+                   || '';
+        // Fallback: extrai do texto do lance, ex: "Goal! Team. Player Name ..."
+        if (!player && d.text) {
+          // Remove prefixos comuns e tenta pegar o nome próprio
+          const m = d.text.match(/(?:Goal!?\s*[^.]*\.\s*)([A-Z][\wÀ-ÿ'\-]+(?:\s[A-Z][\wÀ-ÿ'\-]+)*)/);
+          if (m && m[1]) player = m[1].trim();
+        }
         return {
           team:   teamStr,
-          player: d.athletesInvolved?.[0]?.displayName || '',
+          player,
           clock:  d.clock?.displayValue || ''
         };
       });

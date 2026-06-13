@@ -112,8 +112,10 @@ function extractGoalsFromEvent(ev, comp) {
   return details
     .filter(d => {
       const t = (d.type?.text || '').toLowerCase();
-      const isGoal = d.scoringPlay === true || t.includes('goal');
-      return isGoal && !t.includes('own goal');
+      // Exclui gol contra E cobranças de pênaltis na disputa (shootout)
+      // — nenhum dos dois conta para a artilharia oficial
+      if (t.includes('own goal') || t.includes('shootout')) return false;
+      return d.scoringPlay === true || t.includes('goal');
     })
     .map(d => {
       let teamStr = countryName(d.team?.displayName || d.team?.name || '');
@@ -158,19 +160,38 @@ async function updateOwnAccumulator() {
       const comp = ev.competitions?.[0];
       if (!comp) continue;
       const state = comp.status?.type?.state || 'pre';
-      if (state !== 'post') continue; // só jogos encerrados
-      if (accum.processedMatches.includes(ev.id)) continue;
+      if (state !== 'post' && state !== 'in') continue; // jogos em andamento ou encerrados
 
       const goals = extractGoalsFromEvent(ev, comp);
-      for (const gol of goals) {
-        const key = normName(gol.player) + '|' + normName(gol.team || '');
-        if (!accum.players[key]) {
-          accum.players[key] = { name: gol.player, country: gol.team || '', goals: 0 };
+
+      if (state === 'post') {
+        // Jogo encerrado: processa definitivamente (uma única vez)
+        if (accum.processedMatches.includes(ev.id)) continue;
+        for (const gol of goals) {
+          const key = normName(gol.player) + '|' + normName(gol.team || '');
+          if (!accum.players[key]) accum.players[key] = { name: gol.player, country: gol.team || '', goals: 0 };
+          accum.players[key].goals++;
+          newGoalsAdded++;
         }
-        accum.players[key].goals++;
-        newGoalsAdded++;
+        accum.processedMatches.push(ev.id);
+      } else {
+        // Jogo ao vivo: recalcula a contagem "provisória" deste jogo a cada execução
+        accum.liveGoals = accum.liveGoals || {};
+        const prevLive = accum.liveGoals[ev.id] || {};
+        const newLive = {};
+        for (const gol of goals) {
+          const key = normName(gol.player) + '|' + normName(gol.team || '');
+          newLive[key] = (newLive[key]||0) + 1;
+          if (!accum.players[key]) accum.players[key] = { name: gol.player, country: gol.team || '', goals: 0 };
+        }
+        // Ajusta diferença entre contagem provisória anterior e atual
+        const allKeys = new Set([...Object.keys(prevLive), ...Object.keys(newLive)]);
+        allKeys.forEach(k => {
+          const diff = (newLive[k]||0) - (prevLive[k]||0);
+          if (diff !== 0) { accum.players[k].goals += diff; newGoalsAdded += Math.abs(diff); }
+        });
+        accum.liveGoals[ev.id] = newLive;
       }
-      accum.processedMatches.push(ev.id);
     }
   }
 

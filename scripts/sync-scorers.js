@@ -223,7 +223,6 @@ function mergePlayers(espnPlayers, ownPlayers) {
   return Object.values(merged)
     .filter(p => p.goals > 0)
     .sort((a, b) => b.goals - a.goals)
-    .slice(0, 20)
     .map((p, idx) => ({ rank: idx + 1, name: p.name, photo: p.photo || '', country: p.country, goals: p.goals, assists: 0, matches: 0, source: p.source }));
 }
 

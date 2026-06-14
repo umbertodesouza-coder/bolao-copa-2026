@@ -231,12 +231,23 @@ async function syncLive() {
     const history = historySnap.exists ? historySnap.data() : {};
     history.days = history.days || {};
 
-    // 1) Backfill de dias antigos (antes de "ontem") ainda não cacheados
-    const startDate  = new Date('2026-06-11T00:00:00Z');
+    // Mescla cards no histórico de um dia, deduplicando por id (não perde
+    // jogos já cacheados ao atualizar/adicionar jogos recém-encerrados)
+    function mergeIntoHistory(ds, cards) {
+      if (!cards.length) return;
+      const existing = history.days[ds] || [];
+      const byId = {};
+      existing.forEach(g => { byId[g.id] = g; });
+      cards.forEach(g => { byId[g.id] = g; });
+      history.days[ds] = Object.values(byId).sort((a,b) => new Date(a.date) - new Date(b.date));
+    }
+
+    // 1) Backfill de dias antigos (até ontem, inclusive) ainda não cacheados
+    const startDate   = new Date('2026-06-11T00:00:00Z');
     const yestDateObj = new Date(`${yestBRT.slice(0,4)}-${yestBRT.slice(4,6)}-${yestBRT.slice(6,8)}T00:00:00Z`);
 
     let backfilled = 0;
-    for (let d = new Date(startDate); d < yestDateObj; d.setDate(d.getDate()+1)) {
+    for (let d = new Date(startDate); d <= yestDateObj; d.setDate(d.getDate()+1)) {
       const ds = d.toISOString().slice(0,10).replace(/-/g,'');
       if (history.days[ds]) continue; // já cacheado
       try {
@@ -251,11 +262,12 @@ async function syncLive() {
       }
     }
 
-    // 2) Atualiza ontem/hoje com os jogos encerrados já buscados (auto-correção)
+    // 2) Mescla ontem/hoje com os jogos encerrados já buscados (auto-correção,
+    //    sem perder jogos já cacheados pelo backfill)
     const finishedToday = games.filter(g => g.isFinished && dateBRT(g.date) === todayBRT);
     const finishedYest  = games.filter(g => g.isFinished && dateBRT(g.date) === yestBRT);
-    if (finishedToday.length) history.days[todayBRT] = finishedToday;
-    if (finishedYest.length)  history.days[yestBRT]  = finishedYest;
+    mergeIntoHistory(todayBRT, finishedToday);
+    mergeIntoHistory(yestBRT,  finishedYest);
 
     history.updatedAt = admin.firestore.FieldValue.serverTimestamp();
     await historyRef.set(history);

@@ -30,7 +30,7 @@ const ESPN_TM = {
   'Uzbekistan':'Uzbequistão','DR Congo':'RD Congo','England':'Inglaterra',
   'Croatia':'Croácia','Ghana':'Gana','Panama':'Panamá',
   'Korea Republic':'Coreia do Sul','Czechia':'Rep. Tcheca',
-  'Turkiye':'Turquia','USA':'EUA'
+  'Turkiye':'Turquia','Türkiye':'Turquia','Congo DR':'RD Congo','USA':'EUA'
 };
 
 function teamName(n) { return ESPN_TM[n] || n; }

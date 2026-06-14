@@ -1,7 +1,8 @@
 /**
- * Bolão Copa 2026 — Sincronizador Ao Vivo
+ * Bolão Copa 2026 — Sincronizador Ao Vivo + Histórico
  * GitHub Actions — roda a cada 5 minutos
- * Busca placar em tempo real da ESPN e grava no Firestore /config/live
+ * - config/live: jogos de hoje (+ ontem se ainda relevantes)
+ * - config/liveHistory: todos os jogos encerrados desde 11/jun (cache incremental)
  */
 
 const admin = require('firebase-admin');
@@ -12,6 +13,8 @@ admin.initializeApp({
   projectId: process.env.FIREBASE_PROJECT_ID || 'copa-do-mundo-3c309'
 });
 const db = admin.firestore();
+
+const BRT_OFFSET = -3 * 60 * 60 * 1000;
 
 const ESPN_TM = {
   'Mexico':'México','South Korea':'Coreia do Sul','Czech Republic':'Rep. Tcheca',
@@ -35,18 +38,20 @@ const ESPN_TM = {
 
 function teamName(n) { return ESPN_TM[n] || n; }
 
+function dateBRT(isoDate) {
+  return new Date(new Date(isoDate).getTime() + BRT_OFFSET).toISOString().slice(0,10).replace(/-/g,'');
+}
+
 // Formata horário do jogo em horário de Brasília (UTC-3)
 function formatMatchTime(dateStr) {
   if (!dateStr) return 'A confirmar';
   const d = new Date(dateStr);
-  const BRT_OFFSET = -3 * 60 * 60 * 1000;
   const local = new Date(d.getTime() + BRT_OFFSET);
   const day   = String(local.getUTCDate()).padStart(2, '0');
   const month = String(local.getUTCMonth() + 1).padStart(2, '0');
   const hours = String(local.getUTCHours()).padStart(2, '0');
   const mins  = String(local.getUTCMinutes()).padStart(2, '0');
 
-  // Verificar se é hoje (também em BRT)
   const now   = new Date();
   const today = new Date(now.getTime() + BRT_OFFSET);
   const isToday = local.getUTCDate()  === today.getUTCDate() &&
@@ -60,15 +65,10 @@ function formatMatchTime(dateStr) {
 function statusLabel(state, detail, clock, matchDate, period) {
   if (state === 'in') {
     const d = (detail || '').toLowerCase();
-    // Intervalo normal
     if (d === 'halftime' || d === 'half time' || d === 'ht' || d === 'half') return '⏸ Intervalo';
-    // Intervalo prorrogação
     if (d.includes('end of extra') || d.includes('extra time half')) return '⏸ Int. Prorrogação';
-    // Pênaltis
     if (d.includes('penalty') || d.includes('penalties') || d.includes('shootout') || d.includes('pso')) return '⚽ Pênaltis';
-    // Prorrogação (period >= 3 ou keyword)
     if (period >= 3 || d.includes('extra') || d.includes('overtime')) return '⏱ Prorrogação ' + (clock || '').trim();
-    // Usa period da ESPN para 1T/2T (mais confiável que o texto)
     const t = period === 2 ? '2T' : '1T';
     return '🔴 ' + t + ' ' + (clock || '').trim();
   }
@@ -76,14 +76,86 @@ function statusLabel(state, detail, clock, matchDate, period) {
   return formatMatchTime(matchDate);
 }
 
+// ── Constrói o "card" de um jogo a partir do evento ESPN ───────────────────
+function buildGameCard(ev, comp) {
+  const status = comp.status;
+  const state  = status?.type?.state || 'pre';
+  const competitors = comp.competitors || [];
+  const home = competitors.find(c => c.homeAway === 'home');
+  const away = competitors.find(c => c.homeAway === 'away');
+  if (!home || !away) return null;
+
+  const homeName  = teamName(home.team?.displayName || home.team?.name || '');
+  const awayName  = teamName(away.team?.displayName || away.team?.name || '');
+  const homeScore = home.score !== undefined ? String(home.score) : '-';
+  const awayScore = away.score !== undefined ? String(away.score) : '-';
+
+  const homeId = home.team?.id || '';
+  const awayId = away.team?.id || '';
+
+  const details = comp.details || [];
+  const goals = details
+    .filter(d => {
+      const t = (d.type?.text || '').toLowerCase();
+      if (t.includes('shootout')) return false;
+      return d.scoringPlay === true || t.includes('goal');
+    })
+    .map(d => {
+      const typeText = (d.type?.text || '').toLowerCase();
+      const isOwnGoal = typeText.includes('own goal');
+
+      let teamStr = teamName(d.team?.displayName || d.team?.name || '');
+      if (!teamStr && d.team?.id) {
+        if (String(d.team.id) === String(homeId)) teamStr = homeName;
+        else if (String(d.team.id) === String(awayId)) teamStr = awayName;
+      }
+      let player = d.athletesInvolved?.[0]?.displayName
+                 || d.athletesInvolved?.[0]?.shortName
+                 || '';
+      if (!player && d.text) {
+        const m = d.text.match(/(?:Goal!?\s*[^.]*\.\s*)([A-Z][\wÀ-ÿ'\-]+(?:\s[A-Z][\wÀ-ÿ'\-]+)*)/);
+        if (m && m[1]) player = m[1].trim();
+      }
+      return {
+        team:   teamStr,
+        player,
+        clock:  d.clock?.displayValue || '',
+        ownGoal: isOwnGoal
+      };
+    });
+
+  return {
+    id: ev.id,
+    home: homeName,
+    away: awayName,
+    homeScore,
+    awayScore,
+    state,
+    period:      comp.status?.period || 1,
+    clock:       status?.displayClock || '',
+    statusLabel: statusLabel(state, status?.type?.shortDetail, status?.displayClock, ev.date, comp.status?.period || 1),
+    isLive:      state === 'in',
+    isFinished:  state === 'post',
+    date:        ev.date,
+    goals
+  };
+}
+
+async function fetchEspnDay(dateStr) {
+  const res = await fetch(
+    `https://site.api.espn.com/apis/site/v2/sports/soccer/FIFA.WORLD/scoreboard?dates=${dateStr}`,
+    { headers: { 'Accept': 'application/json' } }
+  );
+  if (!res.ok) throw new Error(`ESPN HTTP ${res.status} (${dateStr})`);
+  const data = await res.json();
+  return data.events || [];
+}
+
 async function syncLive() {
   const now = Date.now();
   console.log(`[${new Date().toISOString()}] Sincronizando dados ao vivo...`);
 
   // Datas de "hoje" e "ontem" em horário de Brasília (UTC-3)
-  // Busca os dois dias porque um jogo iniciado às 23h BRT pode
-  // ser classificado pela ESPN sob a data UTC seguinte
-  const BRT_OFFSET = -3 * 60 * 60 * 1000;
   const nowBRT   = new Date(Date.now() + BRT_OFFSET);
   const todayBRT = nowBRT.toISOString().slice(0,10).replace(/-/g,'');
   const yestBRT  = new Date(nowBRT.getTime() - 24*60*60*1000).toISOString().slice(0,10).replace(/-/g,'');
@@ -91,13 +163,8 @@ async function syncLive() {
   let events = [];
   try {
     for (const dateStr of [yestBRT, todayBRT]) {
-      const res = await fetch(
-        `https://site.api.espn.com/apis/site/v2/sports/soccer/FIFA.WORLD/scoreboard?dates=${dateStr}`,
-        { headers: { 'Accept': 'application/json' } }
-      );
-      if (!res.ok) throw new Error(`ESPN HTTP ${res.status} (${dateStr})`);
-      const data = await res.json();
-      events.push(...(data.events || []));
+      const evs = await fetchEspnDay(dateStr);
+      events.push(...evs);
     }
   } catch (e) {
     console.error('Erro ESPN:', e.message);
@@ -119,94 +186,23 @@ async function syncLive() {
 
   // Filtrar: manter apenas jogos de "hoje BRT" + jogos ao vivo/recém-encerrados de "ontem BRT"
   const TWO_HOURS = 2 * 60 * 60 * 1000;
-  events = events.filter(ev => {
+  const eventsForToday = events.filter(ev => {
     const comp  = ev.competitions?.[0];
     const state = comp?.status?.type?.state || 'pre';
-    const evDateBRT = new Date(new Date(ev.date).getTime() + BRT_OFFSET).toISOString().slice(0,10).replace(/-/g,'');
+    const evDate = dateBRT(ev.date);
 
-    if (evDateBRT === todayBRT) return true;
-    // Jogo de "ontem BRT": só mantém se ainda ao vivo ou terminou há pouco
+    if (evDate === todayBRT) return true;
     if (state === 'in') return true;
     if (state === 'post') {
       const elapsed = Date.now() - new Date(ev.date).getTime();
-      return elapsed < TWO_HOURS + (3*60*60*1000); // até ~2h após o fim (considerando ~2h de jogo)
+      return elapsed < TWO_HOURS + (3*60*60*1000);
     }
     return false;
   });
 
-  const games = [];
-
-  for (const ev of events) {
-    const comp = ev.competitions?.[0];
-    if (!comp) continue;
-    const status = comp.status;
-    const state  = status?.type?.state || 'pre';
-    const competitors = comp.competitors || [];
-    const home = competitors.find(c => c.homeAway === 'home');
-    const away = competitors.find(c => c.homeAway === 'away');
-    if (!home || !away) continue;
-
-    const homeName  = teamName(home.team?.displayName || home.team?.name || '');
-    const awayName  = teamName(away.team?.displayName || away.team?.name || '');
-    const homeScore = home.score !== undefined ? String(home.score) : '-';
-    const awayScore = away.score !== undefined ? String(away.score) : '-';
-
-    // IDs dos times para cruzar com o gol
-    const homeId = home.team?.id || '';
-    const awayId  = away.team?.id || '';
-
-    const details = comp.details || [];
-    const goals = details
-      .filter(d => {
-        const t = (d.type?.text || '').toLowerCase();
-        // Exclui cobranças da disputa de pênaltis (shootout) — não são "gols" do jogo
-        if (t.includes('shootout')) return false;
-        return d.scoringPlay === true || t.includes('goal');
-      })
-      .map(d => {
-        const typeText = (d.type?.text || '').toLowerCase();
-        const isOwnGoal = typeText.includes('own goal');
-
-        let teamStr = teamName(d.team?.displayName || d.team?.name || '');
-        // Se o nome veio vazio, tenta cruzar pelo ID
-        if (!teamStr && d.team?.id) {
-          if (String(d.team.id) === String(homeId)) teamStr = homeName;
-          else if (String(d.team.id) === String(awayId)) teamStr = awayName;
-        }
-        // Nome do jogador: tenta athletesInvolved primeiro
-        let player = d.athletesInvolved?.[0]?.displayName
-                   || d.athletesInvolved?.[0]?.shortName
-                   || '';
-        // Fallback: extrai do texto do lance, ex: "Goal! Team. Player Name ..."
-        if (!player && d.text) {
-          // Remove prefixos comuns e tenta pegar o nome próprio
-          const m = d.text.match(/(?:Goal!?\s*[^.]*\.\s*)([A-Z][\wÀ-ÿ'\-]+(?:\s[A-Z][\wÀ-ÿ'\-]+)*)/);
-          if (m && m[1]) player = m[1].trim();
-        }
-        return {
-          team:   teamStr,
-          player,
-          clock:  d.clock?.displayValue || '',
-          ownGoal: isOwnGoal
-        };
-      });
-
-    games.push({
-      id: ev.id,
-      home: homeName,
-      away: awayName,
-      homeScore,
-      awayScore,
-      state,
-      period:      comp.status?.period || 1,
-      clock:       status?.displayClock || '',
-      statusLabel: statusLabel(state, status?.type?.shortDetail, status?.displayClock, ev.date, comp.status?.period || 1),
-      isLive:      state === 'in',
-      isFinished:  state === 'post',
-      date:        ev.date,
-      goals
-    });
-  }
+  const games = eventsForToday
+    .map(ev => { const comp = ev.competitions?.[0]; return comp ? buildGameCard(ev, comp) : null; })
+    .filter(Boolean);
 
   games.sort((a, b) => {
     if (a.isLive && !b.isLive) return -1;
@@ -224,6 +220,53 @@ async function syncLive() {
   });
 
   console.log(`  ✓ ${games.length} jogo(s) hoje | ${games.filter(g=>g.isLive).length} ao vivo`);
+
+  // ── Histórico (config/liveHistory) ────────────────────────────────────
+  // Acumula, por dia (chave YYYYMMDD), os jogos encerrados desde 11/jun.
+  // Dias com mais de 1 dia de "idade" são buscados/cacheados uma única vez.
+  // Ontem/hoje são recalculados a cada execução (auto-correção).
+  try {
+    const historyRef  = db.doc('config/liveHistory');
+    const historySnap = await historyRef.get();
+    const history = historySnap.exists ? historySnap.data() : {};
+    history.days = history.days || {};
+
+    // 1) Backfill de dias antigos (antes de "ontem") ainda não cacheados
+    const startDate  = new Date('2026-06-11T00:00:00Z');
+    const yestDateObj = new Date(`${yestBRT.slice(0,4)}-${yestBRT.slice(4,6)}-${yestBRT.slice(6,8)}T00:00:00Z`);
+
+    let backfilled = 0;
+    for (let d = new Date(startDate); d < yestDateObj; d.setDate(d.getDate()+1)) {
+      const ds = d.toISOString().slice(0,10).replace(/-/g,'');
+      if (history.days[ds]) continue; // já cacheado
+      try {
+        const evs = await fetchEspnDay(ds);
+        const cards = evs
+          .map(ev => { const comp = ev.competitions?.[0]; return comp ? buildGameCard(ev, comp) : null; })
+          .filter(g => g && g.isFinished);
+        history.days[ds] = cards;
+        backfilled++;
+      } catch (e) {
+        console.warn(`  Histórico ${ds}: erro ${e.message}`);
+      }
+    }
+
+    // 2) Atualiza ontem/hoje com os jogos encerrados já buscados (auto-correção)
+    const finishedToday = games.filter(g => g.isFinished && dateBRT(g.date) === todayBRT);
+    const finishedYest  = games.filter(g => g.isFinished && dateBRT(g.date) === yestBRT);
+    if (finishedToday.length) history.days[todayBRT] = finishedToday;
+    if (finishedYest.length)  history.days[yestBRT]  = finishedYest;
+
+    history.updatedAt = admin.firestore.FieldValue.serverTimestamp();
+    await historyRef.set(history);
+
+    const totalDays  = Object.keys(history.days).length;
+    const totalGames = Object.values(history.days).reduce((s, arr) => s + (arr?.length||0), 0);
+    console.log(`  ✓ Histórico: ${totalDays} dia(s) (+${backfilled} novo(s)) · ${totalGames} jogo(s) encerrado(s) no total`);
+  } catch (e) {
+    console.warn('  Aviso — histórico não atualizado:', e.message);
+  }
+
   console.log(`  ✓ Concluído em ${Date.now()-now}ms`);
 }
 

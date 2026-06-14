@@ -164,6 +164,9 @@ async function syncLive() {
         return d.scoringPlay === true || t.includes('goal');
       })
       .map(d => {
+        const typeText = (d.type?.text || '').toLowerCase();
+        const isOwnGoal = typeText.includes('own goal');
+
         let teamStr = teamName(d.team?.displayName || d.team?.name || '');
         // Se o nome veio vazio, tenta cruzar pelo ID
         if (!teamStr && d.team?.id) {
@@ -183,7 +186,8 @@ async function syncLive() {
         return {
           team:   teamStr,
           player,
-          clock:  d.clock?.displayValue || ''
+          clock:  d.clock?.displayValue || '',
+          ownGoal: isOwnGoal
         };
       });
 

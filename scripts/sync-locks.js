@@ -245,7 +245,7 @@ async function syncLocks() {
     const t1     = teamName(home.team?.displayName||home.team?.name||'');
     const t2     = teamName(away.team?.displayName||away.team?.name||'');
     const lockTs = new Date(ev.date).getTime();
-    const isPost = state==='post' || state==='in'; // ao vivo + final
+    const isPost = state==='post' || state==='in';
     const score  = (isPost&&home.score!=null) ? {h:String(home.score),a:String(away.score)} : null;
 
     // ── Fase de grupos ──────────────────────────────────────────────────
@@ -253,13 +253,10 @@ async function syncLocks() {
     if (mid) {
       if (lockTs) lt[mid] = lockTs;
       if (score) {
-        // Garante que o placar é salvo na ordem GD (não ESPN)
-        // GD define quem é "home" no bolão — ESPN pode ter ordem inversa
         const gdGrp = mid.slice(0, mid.length - 1);
         const gdIdx = parseInt(mid.slice(mid.length - 1));
         const gdMatch = getMx(GD[gdGrp])[gdIdx];
         if (gdMatch && t1 !== gdMatch.h) {
-          // ESPN tem home/away invertido vs GD — troca h e a
           results[mid] = {h: score.a, a: score.h};
         } else {
           results[mid] = score;
@@ -269,7 +266,7 @@ async function syncLocks() {
       continue;
     }
 
-    // Log de diagnóstico — times não mapeados (podem ser fase de grupos faltando)
+    // Log de diagnóstico
     if (state === 'pre' || state === 'post' || state === 'in') {
       console.log(`  [DIAGNÓSTICO] Não mapeado: "${t1}" x "${t2}" (state=${state}, date=${ev.date?.slice(0,10)})`);
     }
@@ -290,7 +287,8 @@ async function syncLocks() {
     if (score)  results[kid] = score;
     koMatches.push({
       id:kid, phase, date:ev.date?.slice(0,10)||null, lt:lockTs||null,
-      t1, t2, score, known:!tbd(t1)&&!tbd(t2)&&Date.now()>=new Date('2026-06-27').getTime()
+      t1, t2, score,
+      known: !tbd(t1) && !tbd(t2)  // ← portão de data removido
     });
     koCount++;
   }

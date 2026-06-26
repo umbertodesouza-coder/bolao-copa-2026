@@ -277,11 +277,32 @@ async function syncLocks() {
     for (const [key, val] of Object.entries(ROUND_MAP)) {
       if (noteText.includes(key)) { phase = val; break; }
     }
+
+    // Fallback 1: detectar fase pelos nomes dos times (ESPN usa placeholders)
+    if (!phase) {
+      const combined = (t1 + ' ' + t2).toLowerCase();
+      if      (combined.includes('quarterfinal'))     phase = 'sf';
+      else if (combined.includes('round of 16'))      phase = 'qf';
+      else if (combined.includes('round of 32'))      phase = 'r16';
+      else if (combined.includes('group') || combined.includes('place')) phase = 'r32';
+    }
+
+    // Fallback 2: detectar fase por data (para times já definidos, sem placeholder)
+    if (!phase) {
+      const md = ev.date?.slice(0, 10) || '';
+      if      (md >= '2026-06-28' && md <= '2026-07-04') phase = 'r32';
+      else if (md >= '2026-07-05' && md <= '2026-07-07') phase = 'r16';
+      else if (md >= '2026-07-09' && md <= '2026-07-12') phase = 'qf';
+      else if (md >= '2026-07-14' && md <= '2026-07-15') phase = 'sf';
+      else if (md === '2026-07-18')                       phase = 'tp';
+      else if (md === '2026-07-19')                       phase = 'final';
+    }
+
     if (!phase) continue;
 
     if (!roundCtrs[phase]) roundCtrs[phase] = 0;
     const kid = `${phase}_${roundCtrs[phase]++}`;
-    const tbd = n => !n||['winner','runner','loser','tbd','a definir'].some(x=>n.toLowerCase().includes(x));
+    const tbd = n => !n||['winner','runner','loser','tbd','a definir','group ','place'].some(x=>n.toLowerCase().includes(x));
 
     if (lockTs) lt[kid] = lockTs;
     if (score)  results[kid] = score;

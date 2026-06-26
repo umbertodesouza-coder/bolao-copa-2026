@@ -13,43 +13,43 @@ admin.initializeApp({
 });
 const db = admin.firestore();
 
-// ── Mapeamento ESPN → nomes do bolão ─────────────────────────────────────
+// ── Mapeamento ESPN → nomes do bolão (com acentos, igual ao FLAGS do index.html) ──
 const ESPN_TM = {
-  'Mexico':'Mexico','South Korea':'Coreia do Sul','Czech Republic':'Rep. Tcheca',
-  'Czechia':'Rep. Tcheca','South Africa':'Africa do Sul','Canada':'Canada',
-  'Switzerland':'Suica','Qatar':'Catar','Bosnia-Herzegovina':'Bosnia',
-  'Bosnia and Herzegovina':'Bosnia','Bosnia & Herzegovina':'Bosnia',
-  'Brazil':'Brasil','Morocco':'Marrocos','Scotland':'Escocia','Haiti':'Haiti',
+  'Mexico':'México','South Korea':'Coreia do Sul','Czech Republic':'Rep. Tcheca',
+  'Czechia':'Rep. Tcheca','South Africa':'África do Sul','Canada':'Canadá',
+  'Switzerland':'Suíça','Qatar':'Catar','Bosnia-Herzegovina':'Bósnia',
+  'Bosnia and Herzegovina':'Bósnia','Bosnia & Herzegovina':'Bósnia',
+  'Brazil':'Brasil','Morocco':'Marrocos','Scotland':'Escócia','Haiti':'Haiti',
   'United States':'EUA','USA':'EUA','Paraguay':'Paraguai','Turkey':'Turquia',
-  'Turkiye':'Turquia','Türkiye':'Turquia','Australia':'Australia','Germany':'Alemanha',
-  'Ecuador':'Equador','Ivory Coast':'Costa do Marfim','Curaçao':'Curacao',
-  'Netherlands':'Holanda','Japan':'Japao','Sweden':'Suecia','Tunisia':'Tunisia',
-  'Belgium':'Belgica','Iran':'Ira','Egypt':'Egito','New Zealand':'Nova Zelandia',
-  'Spain':'Espanha','Uruguay':'Uruguai','Saudi Arabia':'Arabia Saudita',
-  'Cape Verde':'Cabo Verde','France':'Franca','Senegal':'Senegal',
-  'Norway':'Noruega','Iraq':'Iraque','Argentina':'Argentina','Austria':'Austria',
-  'Algeria':'Algeria','Jordan':'Jordania','Portugal':'Portugal',
-  'Colombia':'Colombia','Uzbekistan':'Uzbequistao','DR Congo':'RD Congo','Congo DR':'RD Congo',
-  'England':'Inglaterra','Croatia':'Croacia','Ghana':'Gana','Panama':'Panama',
-  'Korea Republic':'Coreia do Sul','Curacao':'Curacao'
+  'Turkiye':'Turquia','Türkiye':'Turquia','Australia':'Austrália','Germany':'Alemanha',
+  'Ecuador':'Equador','Ivory Coast':'Costa do Marfim','Curaçao':'Curaçao','Curacao':'Curaçao',
+  'Netherlands':'Holanda','Japan':'Japão','Sweden':'Suécia','Tunisia':'Tunísia',
+  'Belgium':'Bélgica','Iran':'Irã','Egypt':'Egito','New Zealand':'Nova Zelândia',
+  'Spain':'Espanha','Uruguay':'Uruguai','Saudi Arabia':'Arábia Saudita',
+  'Cape Verde':'Cabo Verde','France':'França','Senegal':'Senegal',
+  'Norway':'Noruega','Iraq':'Iraque','Argentina':'Argentina','Austria':'Áustria',
+  'Algeria':'Argélia','Jordan':'Jordânia','Portugal':'Portugal',
+  'Colombia':'Colômbia','Uzbekistan':'Uzbequistão','DR Congo':'RD Congo','Congo DR':'RD Congo',
+  'England':'Inglaterra','Croatia':'Croácia','Ghana':'Gana','Panama':'Panamá',
+  'Korea Republic':'Coreia do Sul'
 };
 
 function teamName(n) { return ESPN_TM[n] || n; }
 
-// ── Estrutura dos grupos ──────────────────────────────────────────────────
+// ── Estrutura dos grupos (com acentos, igual ao FLAGS do index.html) ──────────
 const GD = {
-  A:['Mexico','Coreia do Sul','Rep. Tcheca','Africa do Sul'],
-  B:['Canada','Suica','Catar','Bosnia'],
-  C:['Brasil','Marrocos','Escocia','Haiti'],
-  D:['EUA','Paraguai','Turquia','Australia'],
-  E:['Alemanha','Equador','Costa do Marfim','Curacao'],
-  F:['Holanda','Japao','Suecia','Tunisia'],
-  G:['Belgica','Ira','Egito','Nova Zelandia'],
-  H:['Espanha','Uruguai','Arabia Saudita','Cabo Verde'],
-  I:['Franca','Senegal','Noruega','Iraque'],
-  J:['Argentina','Austria','Algeria','Jordania'],
-  K:['Portugal','Colombia','Uzbequistao','RD Congo'],
-  L:['Inglaterra','Croacia','Gana','Panama']
+  A:['México','Coreia do Sul','Rep. Tcheca','África do Sul'],
+  B:['Canadá','Suíça','Catar','Bósnia'],
+  C:['Brasil','Marrocos','Escócia','Haiti'],
+  D:['EUA','Paraguai','Turquia','Austrália'],
+  E:['Alemanha','Equador','Costa do Marfim','Curaçao'],
+  F:['Holanda','Japão','Suécia','Tunísia'],
+  G:['Bélgica','Irã','Egito','Nova Zelândia'],
+  H:['Espanha','Uruguai','Arábia Saudita','Cabo Verde'],
+  I:['França','Senegal','Noruega','Iraque'],
+  J:['Argentina','Áustria','Argélia','Jordânia'],
+  K:['Portugal','Colômbia','Uzbequistão','RD Congo'],
+  L:['Inglaterra','Croácia','Gana','Panamá']
 };
 const GK = Object.keys(GD);
 
@@ -62,6 +62,24 @@ const ROUND_MAP = {
   'Bronze Final':'tp','3rd Place':'tp','Play-off for third place':'tp',
   'Final':'final','The Final':'final'
 };
+
+// ── Traduz placeholders ESPN (inglês) para português ─────────────────────────
+function translatePlaceholder(name) {
+  if (!name) return name;
+  // "Third Place Group A/B/C/D/F" → "3º Lugar Grupo A/B/C/D/F"
+  name = name.replace(/Third Place Group\s+/i, '3º Lugar Grupo ');
+  // "Group A Winner" → "1º Grupo A"
+  name = name.replace(/Group ([A-Z])\s+Winner/i, '1º Grupo $1');
+  // "Group A 2nd Place" → "2º Grupo A"
+  name = name.replace(/Group ([A-Z])\s+2nd Place/i, '2º Grupo $1');
+  // "Round of 32 N Winner" → "Venc. 16-avos #N"
+  name = name.replace(/Round of 32 (\d+) Winner/i, 'Venc. 16-avos #$1');
+  // "Round of 16 N Winner" → "Venc. Oitavas #N"
+  name = name.replace(/Round of 16 (\d+) Winner/i, 'Venc. Oitavas #$1');
+  // "Quarterfinal N Winner" → "Venc. Quartas #N"
+  name = name.replace(/Quarterfinal (\d+) Winner/i, 'Venc. Quartas #$1');
+  return name;
+}
 
 function getMx(ts) {
   const m = [];
@@ -85,7 +103,7 @@ function findMid(t1, t2) {
 const ALL_MIDS = [];
 GK.forEach(g => { getMx(GD[g]).forEach((_, i) => ALL_MIDS.push(g+i)); });
 
-// ── Buscar partidas ESPN ──────────────────────────────────────────────────
+// ── Buscar partidas ESPN ──────────────────────────────────────────────────────
 async function fetchESPN(dateStr) {
   const url = `https://site.api.espn.com/apis/site/v2/sports/soccer/FIFA.WORLD/scoreboard?dates=${dateStr}&limit=100`;
   const res = await fetch(url, { headers: { 'Accept': 'application/json' } });
@@ -95,12 +113,10 @@ async function fetchESPN(dateStr) {
 }
 
 async function fetchAllMatches() {
-  // Copa: 11/jun a 19/jul de 2026
-  // Consulta passado (resultados) + futuro (horários dos jogos)
   const start = new Date('2026-06-11');
   const end   = new Date('2026-07-20');
   const today = new Date();
-  const future = new Date(today.getTime() + 21 * 24 * 60 * 60 * 1000); // +21 dias
+  const future = new Date(today.getTime() + 21 * 24 * 60 * 60 * 1000);
   const until = end < future ? end : future;
 
   const allEvents = [];
@@ -116,7 +132,7 @@ async function fetchAllMatches() {
   return allEvents;
 }
 
-// ── Pontuação ─────────────────────────────────────────────────────────────
+// ── Pontuação ─────────────────────────────────────────────────────────────────
 const PH_SCORE = {
   group:{r:1,e:3}, r32:{r:2,e:6}, r16:{r:4,e:12},
   qf:{r:8,e:24}, sf:{r:16,e:48}, tp:{r:16,e:48}, final:{r:32,e:96}
@@ -212,7 +228,7 @@ async function syncRanking(results, koMatches, bonusRes) {
   console.log(`  ✓ 1º lugar: ${top?.name||'—'} (${top?.pts||0}pts)`);
 }
 
-// ── Principal ─────────────────────────────────────────────────────────────
+// ── Principal ─────────────────────────────────────────────────────────────────
 async function syncLocks() {
   const now = Date.now();
   console.log(`[${new Date().toISOString()}] Iniciando sincronização via ESPN...`);
@@ -248,7 +264,7 @@ async function syncLocks() {
     const isPost = state==='post' || state==='in';
     const score  = (isPost&&home.score!=null) ? {h:String(home.score),a:String(away.score)} : null;
 
-    // ── Fase de grupos ──────────────────────────────────────────────────
+    // ── Fase de grupos ────────────────────────────────────────────────────────
     const mid = findMid(t1, t2);
     if (mid) {
       if (lockTs) lt[mid] = lockTs;
@@ -271,7 +287,7 @@ async function syncLocks() {
       console.log(`  [DIAGNÓSTICO] Não mapeado: "${t1}" x "${t2}" (state=${state}, date=${ev.date?.slice(0,10)})`);
     }
 
-    // ── Mata-mata ───────────────────────────────────────────────────────
+    // ── Mata-mata ─────────────────────────────────────────────────────────────
     const noteText = comp.notes?.[0]?.text || comp.status?.type?.shortDetail || '';
     let phase = null;
     for (const [key, val] of Object.entries(ROUND_MAP)) {
@@ -287,7 +303,7 @@ async function syncLocks() {
       else if (combined.includes('group') || combined.includes('place')) phase = 'r32';
     }
 
-    // Fallback 2: detectar fase por data (para times já definidos, sem placeholder)
+    // Fallback 2: detectar fase por data (times já definidos, sem placeholder)
     if (!phase) {
       const md = ev.date?.slice(0, 10) || '';
       if      (md >= '2026-06-28' && md <= '2026-07-04') phase = 'r32';
@@ -302,14 +318,20 @@ async function syncLocks() {
 
     if (!roundCtrs[phase]) roundCtrs[phase] = 0;
     const kid = `${phase}_${roundCtrs[phase]++}`;
+
+    // tbd verifica nomes ORIGINAIS (inglês ESPN) — antes de traduzir
     const tbd = n => !n||['winner','runner','loser','tbd','a definir','group ','place'].some(x=>n.toLowerCase().includes(x));
+
+    // Traduz placeholders para português DEPOIS de verificar tbd
+    const t1Pt = translatePlaceholder(t1);
+    const t2Pt = translatePlaceholder(t2);
 
     if (lockTs) lt[kid] = lockTs;
     if (score)  results[kid] = score;
     koMatches.push({
       id:kid, phase, date:ev.date?.slice(0,10)||null, lt:lockTs||null,
-      t1, t2, score,
-      known: !tbd(t1) && !tbd(t2)  // ← portão de data removido
+      t1: t1Pt, t2: t2Pt, score,
+      known: !tbd(t1) && !tbd(t2)  // usa nomes originais para tbd
     });
     koCount++;
   }

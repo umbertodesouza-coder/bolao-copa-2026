@@ -303,13 +303,21 @@ async function syncLocks() {
       else if (combined.includes('group') || combined.includes('place')) phase = 'r32';
     }
 
-    // Fallback 2: detectar fase por data (times já definidos, sem placeholder)
+    // Fallback 2: detectar fase por data + contagem máxima por fase
+    // R32=16 jogos, R16=8, QF=4, SF=2
+    // Necessário porque o último jogo do R32 (22h30 BRT 03/jul = 01h30 UTC 04/jul)
+    // e os primeiros do R16 (14h00 BRT 04/jul) aparecem todos como dia 04/jul no ESPN (UTC)
     if (!phase) {
       const md = ev.date?.slice(0, 10) || '';
-      if      (md >= '2026-06-28' && md <= '2026-07-04') phase = 'r32';
-      else if (md >= '2026-07-05' && md <= '2026-07-07') phase = 'r16';
-      else if (md >= '2026-07-09' && md <= '2026-07-12') phase = 'qf';
-      else if (md >= '2026-07-14' && md <= '2026-07-15') phase = 'sf';
+      const r32Full = (roundCtrs['r32'] || 0) >= 16;
+      const r16Full = (roundCtrs['r16'] || 0) >= 8;
+      const qfFull  = (roundCtrs['qf']  || 0) >= 4;
+      const sfFull  = (roundCtrs['sf']  || 0) >= 2;
+
+      if      (md >= '2026-06-28' && md <= '2026-07-04') phase = r32Full ? 'r16' : 'r32';
+      else if (md >= '2026-07-05' && md <= '2026-07-07') phase = r16Full ? 'qf'  : 'r16';
+      else if (md >= '2026-07-09' && md <= '2026-07-12') phase = qfFull  ? 'sf'  : 'qf';
+      else if (md >= '2026-07-14' && md <= '2026-07-15') phase = sfFull  ? 'tp'  : 'sf';
       else if (md === '2026-07-18')                       phase = 'tp';
       else if (md === '2026-07-19')                       phase = 'final';
     }

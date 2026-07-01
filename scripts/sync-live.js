@@ -42,7 +42,6 @@ function dateBRT(isoDate) {
   return new Date(new Date(isoDate).getTime() + BRT_OFFSET).toISOString().slice(0,10).replace(/-/g,'');
 }
 
-// Formata horário do jogo em horário de Brasília (UTC-3)
 function formatMatchTime(dateStr) {
   if (!dateStr) return 'A confirmar';
   const d = new Date(dateStr);
@@ -124,6 +123,14 @@ function buildGameCard(ev, comp) {
       };
     });
 
+  // ── Detectar pênaltis ──────────────────────────────────────────────────────
+  // Verifica se houve cobranças de pênalti (shootout) nos detalhes do jogo
+  // OU se o shortDetail da ESPN indica decisão por pênaltis
+  const wentToPenalties = state === 'post' && (
+    details.some(d => (d.type?.text || '').toLowerCase().includes('shootout')) ||
+    /pen|pso|shoot/i.test(comp.status?.type?.shortDetail || '')
+  );
+
   return {
     id: ev.id,
     home: homeName,
@@ -133,9 +140,12 @@ function buildGameCard(ev, comp) {
     state,
     period:      comp.status?.period || 1,
     clock:       status?.displayClock || '',
-    statusLabel: statusLabel(state, status?.type?.shortDetail, status?.displayClock, ev.date, comp.status?.period || 1),
+    statusLabel: wentToPenalties
+      ? '✅ Encerrado (pên.)'
+      : statusLabel(state, status?.type?.shortDetail, status?.displayClock, ev.date, comp.status?.period || 1),
     isLive:      state === 'in',
     isFinished:  state === 'post',
+    penalties:   wentToPenalties,
     date:        ev.date,
     goals
   };
@@ -155,7 +165,6 @@ async function syncLive() {
   const now = Date.now();
   console.log(`[${new Date().toISOString()}] Sincronizando dados ao vivo...`);
 
-  // Datas de "hoje" e "ontem" em horário de Brasília (UTC-3)
   const nowBRT   = new Date(Date.now() + BRT_OFFSET);
   const todayBRT = nowBRT.toISOString().slice(0,10).replace(/-/g,'');
   const yestBRT  = new Date(nowBRT.getTime() - 24*60*60*1000).toISOString().slice(0,10).replace(/-/g,'');
@@ -176,7 +185,6 @@ async function syncLive() {
     return;
   }
 
-  // Remover duplicados (mesmo jogo pode vir nas duas datas)
   const seenIds = new Set();
   events = events.filter(ev => {
     if (seenIds.has(ev.id)) return false;
@@ -184,7 +192,6 @@ async function syncLive() {
     return true;
   });
 
-  // Filtrar: manter apenas jogos de "hoje BRT" + jogos ao vivo/recém-encerrados de "ontem BRT"
   const TWO_HOURS = 2 * 60 * 60 * 1000;
   const eventsForToday = events.filter(ev => {
     const comp  = ev.competitions?.[0];
@@ -221,18 +228,12 @@ async function syncLive() {
 
   console.log(`  ✓ ${games.length} jogo(s) hoje | ${games.filter(g=>g.isLive).length} ao vivo`);
 
-  // ── Histórico (config/liveHistory) ────────────────────────────────────
-  // Acumula, por dia (chave YYYYMMDD), os jogos encerrados desde 11/jun.
-  // Dias com mais de 1 dia de "idade" são buscados/cacheados uma única vez.
-  // Ontem/hoje são recalculados a cada execução (auto-correção).
   try {
     const historyRef  = db.doc('config/liveHistory');
     const historySnap = await historyRef.get();
     const history = historySnap.exists ? historySnap.data() : {};
     history.days = history.days || {};
 
-    // Mescla cards no histórico de um dia, deduplicando por id (não perde
-    // jogos já cacheados ao atualizar/adicionar jogos recém-encerrados)
     function mergeIntoHistory(ds, cards) {
       if (!cards.length) return;
       const existing = history.days[ds] || [];
@@ -242,14 +243,13 @@ async function syncLive() {
       history.days[ds] = Object.values(byId).sort((a,b) => new Date(a.date) - new Date(b.date));
     }
 
-    // 1) Backfill de dias antigos (até ontem, inclusive) ainda não cacheados
     const startDate   = new Date('2026-06-11T00:00:00Z');
     const yestDateObj = new Date(`${yestBRT.slice(0,4)}-${yestBRT.slice(4,6)}-${yestBRT.slice(6,8)}T00:00:00Z`);
 
     let backfilled = 0;
     for (let d = new Date(startDate); d <= yestDateObj; d.setDate(d.getDate()+1)) {
       const ds = d.toISOString().slice(0,10).replace(/-/g,'');
-      if (history.days[ds]) continue; // já cacheado
+      if (history.days[ds]) continue;
       try {
         const evs = await fetchEspnDay(ds);
         const cards = evs
@@ -262,8 +262,6 @@ async function syncLive() {
       }
     }
 
-    // 2) Mescla ontem/hoje com os jogos encerrados já buscados (auto-correção,
-    //    sem perder jogos já cacheados pelo backfill)
     const finishedToday = games.filter(g => g.isFinished && dateBRT(g.date) === todayBRT);
     const finishedYest  = games.filter(g => g.isFinished && dateBRT(g.date) === yestBRT);
     mergeIntoHistory(todayBRT, finishedToday);

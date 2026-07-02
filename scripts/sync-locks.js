@@ -78,6 +78,10 @@ function translatePlaceholder(name) {
   name = name.replace(/Round of 16 (\d+) Winner/i, 'Venc. Oitavas #$1');
   // "Quarterfinal N Winner" → "Venc. Quartas #N"
   name = name.replace(/Quarterfinal (\d+) Winner/i, 'Venc. Quartas #$1');
+  // "Semifinal N Winner" → "Venc. Semi #N"
+  name = name.replace(/Semifinal (\d+) Winner/i, 'Venc. Semi #$1');
+  // "Semifinal N Loser" → "Perd. Semi #N"
+  name = name.replace(/Semifinal (\d+) Loser/i, 'Perd. Semi #$1');
   return name;
 }
 

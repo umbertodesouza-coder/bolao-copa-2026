@@ -8,6 +8,15 @@
  *     que o sync-live.js já captura em config/live (jogos finalizados)
  *  3) Mescla as duas fontes: ESPN tem prioridade quando disponível,
  *     o acumulador próprio cobre jogadores/gols que a ESPN ainda não listou
+ *
+ * Critério de desempate oficial FIFA (Chuteira de Ouro):
+ *  1º) Gols (mais gols)
+ *  2º) Assistências (mais assistências)
+ *  3º) Menos minutos em campo — NÃO implementado (ESPN scoreboard não
+ *      fornece minutos jogados por atleta; exigiria chamadas extras ao
+ *      endpoint de súmula/escalação de cada partida). Quando o critério
+ *      de gols e assistências empatam, os jogadores ficam empatados
+ *      na exibição (mesma posição), igual ao desempate final da FIFA.
  */
 
 const admin = require('firebase-admin');
@@ -91,7 +100,6 @@ async function fetchEspnLeaders() {
 }
 
 // ── 2) Acumulador próprio — busca direto na ESPN (independente de config/live) ──
-// Extrai gols de partidas já encerradas, varrendo as datas da Copa até hoje (BRT)
 async function fetchEspnDay(dateStr) {
   const url = `https://site.api.espn.com/apis/site/v2/sports/soccer/FIFA.WORLD/scoreboard?dates=${dateStr}&limit=100`;
   const res = await fetch(url, { headers: { 'Accept': 'application/json' } });
@@ -100,6 +108,12 @@ async function fetchEspnDay(dateStr) {
   return data.events || [];
 }
 
+// Extrai gols E assistências de um evento.
+// Heurística: em d.athletesInvolved, o índice 0 costuma ser o autor do gol
+// e o índice 1 (quando presente) costuma ser quem deu a assistência — padrão
+// comum na estrutura de "scoring plays" da ESPN. Isso é best-effort: a ESPN
+// nem sempre preenche o segundo atleta. Quando não vier, assistência fica
+// null e não é contabilizada (nunca inventamos um valor).
 function extractGoalsFromEvent(ev, comp) {
   const home = comp.competitors?.find(c=>c.homeAway==='home');
   const away = comp.competitors?.find(c=>c.homeAway==='away');
@@ -130,23 +144,23 @@ function extractGoalsFromEvent(ev, comp) {
         const m = d.text.match(/(?:Goal!?\s*[^.]*\.\s*)([A-Z][\wÀ-ÿ'\-]+(?:\s[A-Z][\wÀ-ÿ'\-]+)*)/);
         if (m && m[1]) player = m[1].trim();
       }
-      return { team: teamStr, player };
+      // Assistência (best-effort — ver comentário da função acima)
+      let assistPlayer = d.athletesInvolved?.[1]?.displayName
+                        || d.athletesInvolved?.[1]?.shortName
+                        || null;
+      return { team: teamStr, player, assistPlayer };
     })
     .filter(g => g.player);
 }
 
 // Acumulador 100% auto-recuperável: a cada execução, RECALCULA do zero os
-// gols de TODOS os jogos (encerrados e ao vivo) guardados por matchId.
-// Não existe "processado uma vez e travado" — se a ESPN completar/corrigir
-// comp.details depois (nome de jogador, pênalti, etc.), o próximo ciclo de
-// 4h já se autocorrige sozinho, sem precisar de script de fix manual.
+// gols/assistências de TODOS os jogos (encerrados e ao vivo) por matchId.
 async function updateOwnAccumulator() {
   const accumRef = await db.doc('config/scorersAccum').get();
   const accum = accumRef.exists ? accumRef.data() : {};
   accum.matchGoals = accum.matchGoals || {}; // jogos encerrados (state='post')
   accum.liveGoals  = accum.liveGoals  || {}; // jogos em andamento (state='in')
 
-  // Datas da Copa: 11/jun até hoje (BRT)
   const BRT_OFFSET = -3 * 60 * 60 * 1000;
   const start = new Date('2026-06-11T00:00:00Z');
   const todayBRT = new Date(Date.now() + BRT_OFFSET);
@@ -165,27 +179,36 @@ async function updateOwnAccumulator() {
       const comp = ev.competitions?.[0];
       if (!comp) continue;
       const state = comp.status?.type?.state || 'pre';
-      const goals = extractGoalsFromEvent(ev, comp).map(g => ({ player: g.player, team: g.team }));
+      const goals = extractGoalsFromEvent(ev, comp).map(g => ({
+        player: g.player, team: g.team, assistPlayer: g.assistPlayer
+      }));
 
       if (state === 'post') {
-        accum.matchGoals[ev.id] = goals; // sempre sobrescreve — sem trava permanente
-        delete accum.liveGoals[ev.id];   // não precisa mais da contagem provisória
+        accum.matchGoals[ev.id] = goals;
+        delete accum.liveGoals[ev.id];
         postCount++;
       } else if (state === 'in') {
         accum.liveGoals[ev.id] = goals;
         liveCount++;
       }
-      // 'pre': nada a fazer
     }
   }
 
-  // Recalcula os totais por jogador do zero, a partir dos dados acima
+  // Recalcula os totais por jogador do zero (gols + assistências)
   const players = {};
+  function key(name, team) { return normName(name) + '|' + normName(team || ''); }
   function addGoals(goalsArr) {
     (goalsArr || []).forEach(g => {
-      const key = normName(g.player) + '|' + normName(g.team || '');
-      if (!players[key]) players[key] = { name: g.player, country: g.team || '', goals: 0 };
-      players[key].goals++;
+      const k = key(g.player, g.team);
+      if (!players[k]) players[k] = { name: g.player, country: g.team || '', goals: 0, assists: 0 };
+      players[k].goals++;
+
+      // Assistência creditada ao jogador que assistiu (mesmo time do gol)
+      if (g.assistPlayer) {
+        const ak = key(g.assistPlayer, g.team);
+        if (!players[ak]) players[ak] = { name: g.assistPlayer, country: g.team || '', goals: 0, assists: 0 };
+        players[ak].assists++;
+      }
     });
   }
   Object.values(accum.matchGoals).forEach(addGoals);
@@ -202,28 +225,33 @@ async function updateOwnAccumulator() {
 function mergePlayers(espnPlayers, ownPlayers) {
   const merged = {};
 
-  // Base: acumulador próprio (sempre presente, fonte garantida)
+  // Base: acumulador próprio (sempre presente, fonte garantida — inclui assistências)
   ownPlayers.forEach(p => {
     const key = normName(p.name) + '|' + normName(p.country);
-    merged[key] = { name: p.name, country: p.country, goals: p.goals, photo: '', source: 'own' };
+    merged[key] = { name: p.name, country: p.country, goals: p.goals, assists: p.assists || 0, photo: '', source: 'own' };
   });
 
-  // ESPN tem prioridade quando disponível: sobrescreve contagem se tiver o jogador
+  // ESPN tem prioridade quando disponível: sobrescreve contagem de GOLS se tiver o jogador
+  // (ESPN leaders não traz assistências, então mantemos as do acumulador próprio)
   espnPlayers.forEach(p => {
     const key = normName(p.name) + '|' + normName(p.country);
     if (merged[key]) {
-      merged[key].goals = Math.max(merged[key].goals, p.goals); // usa o maior dos dois
+      merged[key].goals = Math.max(merged[key].goals, p.goals);
       merged[key].photo = p.photo || merged[key].photo;
       merged[key].source = 'espn+own';
     } else {
-      merged[key] = { ...p, source: 'espn' };
+      merged[key] = { ...p, assists: 0, source: 'espn' };
     }
   });
 
+  // Critério oficial FIFA (Chuteira de Ouro): 1º gols, 2º assistências.
+  // 3º critério (menos minutos em campo) não é aplicado — ESPN scoreboard
+  // não fornece minutos jogados por atleta. Quando gols E assistências
+  // empatam, os jogadores ficam com a mesma posição na exibição.
   return Object.values(merged)
     .filter(p => p.goals > 0)
-    .sort((a, b) => b.goals - a.goals)
-    .map((p, idx) => ({ rank: idx + 1, name: p.name, photo: p.photo || '', country: p.country, goals: p.goals, assists: 0, matches: 0, source: p.source }));
+    .sort((a, b) => b.goals - a.goals || b.assists - a.assists)
+    .map((p, idx) => ({ rank: idx + 1, name: p.name, photo: p.photo || '', country: p.country, goals: p.goals, assists: p.assists || 0, matches: 0, source: p.source }));
 }
 
 async function syncScorers() {
@@ -243,7 +271,7 @@ async function syncScorers() {
   // 2) Acumulador próprio (sempre executa)
   const ownPlayers = await updateOwnAccumulator();
 
-  // 3) Mesclar
+  // 3) Mesclar (já aplica critério de desempate gols → assistências)
   const players = mergePlayers(espnResult.players, ownPlayers);
 
   if (players.length === 0) {
@@ -264,7 +292,7 @@ async function syncScorers() {
   });
 
   console.log(`  ✓ ${players.length} artilheiro(s) salvos`);
-  console.log(`  ✓ Líder: ${players[0]?.name} (${players[0]?.goals} gol(s)) — ${players[0]?.country} [${players[0]?.source}]`);
+  console.log(`  ✓ Líder: ${players[0]?.name} (${players[0]?.goals} gol(s), ${players[0]?.assists} assist.) — ${players[0]?.country} [${players[0]?.source}]`);
   console.log(`  ✓ Concluído em ${Date.now()-now}ms`);
 }
 

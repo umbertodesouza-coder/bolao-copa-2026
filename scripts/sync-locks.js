@@ -267,6 +267,15 @@ async function syncLocks() {
     const lockTs = new Date(ev.date).getTime();
     const isPost = state==='post' || state==='in';
     const score  = (isPost&&home.score!=null) ? {h:String(home.score),a:String(away.score)} : null;
+    // Campo 'winner' da ESPN — mais confiável que comparar placar, pois
+    // continua correto mesmo quando o jogo empata nos 90+prorrogação e é
+    // decidido nos pênaltis (placar registrado fica empatado, mas o campo
+    // 'winner' do time vencedor continua true)
+    let winnerSide = null;
+    if (isPost) {
+      if (home.winner === true) winnerSide = 'h';
+      else if (away.winner === true) winnerSide = 'a';
+    }
 
     // ── Fase de grupos ────────────────────────────────────────────────────────
     const mid = findMid(t1, t2);
@@ -342,7 +351,7 @@ async function syncLocks() {
     if (score)  results[kid] = score;
     koMatches.push({
       id:kid, phase, date:ev.date?.slice(0,10)||null, lt:lockTs||null,
-      t1: t1Pt, t2: t2Pt, score,
+      t1: t1Pt, t2: t2Pt, score, winner:winnerSide,
       known: !tbd(t1) && !tbd(t2)  // usa nomes originais para tbd
     });
     koCount++;

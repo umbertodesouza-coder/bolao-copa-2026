@@ -173,8 +173,8 @@ function buildGameCard(ev, comp) {
     isFinished:  state === 'post',
     penalties:   wentToPenalties,
     inShootout:  inShootout,
-    shootoutKicks: shootoutKicks.length ? shootoutKicks : undefined,
-    penScore:    shootoutKicks.length ? { h: penH, a: penA } : undefined,
+    shootoutKicks: shootoutKicks.length ? shootoutKicks : null,
+    penScore:    shootoutKicks.length ? { h: penH, a: penA } : null,
     date:        ev.date,
     goals
   };

@@ -157,6 +157,15 @@ function buildGameCard(ev, comp) {
     /pen|pso|shoot/i.test(shortDetail)
   );
 
+  // Campo 'winner' da ESPN — fonte confiável de quem venceu, funciona mesmo
+  // quando o placar registrado fica empatado (decisão nos pênaltis). Vem
+  // direto do objeto do time (competitor.winner), não é heurística.
+  let winnerSide = null;
+  if (state === 'post') {
+    if (home.winner === true) winnerSide = 'h';
+    else if (away.winner === true) winnerSide = 'a';
+  }
+
   return {
     id: ev.id,
     home: homeName,
@@ -172,6 +181,7 @@ function buildGameCard(ev, comp) {
     isLive:      state === 'in',
     isFinished:  state === 'post',
     penalties:   wentToPenalties,
+    winner:      winnerSide,
     inShootout:  inShootout,
     shootoutKicks: shootoutKicks.length ? shootoutKicks : null,
     penScore:    shootoutKicks.length ? { h: penH, a: penA } : null,

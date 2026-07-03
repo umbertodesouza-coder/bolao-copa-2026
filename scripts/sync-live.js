@@ -129,6 +129,16 @@ function buildGameCard(ev, comp) {
   // depois de encerrado (state='post'). Nunca conta para o placar/artilharia
   // — é só para exibição da disputa em tempo real.
   const shootoutDetails = details.filter(d => (d.type?.text || '').toLowerCase().includes('shootout'));
+
+  // ── DEBUG TEMPORÁRIO ─────────────────────────────────────────────────────
+  // Loga a estrutura bruta de QUALQUER detalhe que mencione pênalti/shootout,
+  // mesmo que não bata no filtro acima, para descobrirmos o formato real da
+  // ESPN. Remover depois de confirmado.
+  const suspectDetails = details.filter(d => /pen|shoot|pso/i.test(d.type?.text || ''));
+  if (suspectDetails.length) {
+    console.log(`  [DEBUG SHOOTOUT] Jogo ${homeName} x ${awayName} (state=${state}):`);
+    console.log(JSON.stringify(suspectDetails, null, 2));
+  }
   const shootoutKicks = shootoutDetails.map(d => {
     let teamStr = teamName(d.team?.displayName || d.team?.name || '');
     if (!teamStr && d.team?.id) {

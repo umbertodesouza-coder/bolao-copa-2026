@@ -123,12 +123,38 @@ function buildGameCard(ev, comp) {
       };
     });
 
-  // ── Detectar pênaltis ──────────────────────────────────────────────────────
-  // Verifica se houve cobranças de pênalti (shootout) nos detalhes do jogo
-  // OU se o shortDetail da ESPN indica decisão por pênaltis
+  // ── Cobranças de pênalti (disputa por shootout) ─────────────────────────────
+  // Captura cada cobrança individualmente (autor + se converteu), funcionando
+  // TANTO durante o jogo ao vivo (state='in', disputa em andamento) QUANTO
+  // depois de encerrado (state='post'). Nunca conta para o placar/artilharia
+  // — é só para exibição da disputa em tempo real.
+  const shootoutDetails = details.filter(d => (d.type?.text || '').toLowerCase().includes('shootout'));
+  const shootoutKicks = shootoutDetails.map(d => {
+    let teamStr = teamName(d.team?.displayName || d.team?.name || '');
+    if (!teamStr && d.team?.id) {
+      if (String(d.team.id) === String(homeId)) teamStr = homeName;
+      else if (String(d.team.id) === String(awayId)) teamStr = awayName;
+    }
+    let player = d.athletesInvolved?.[0]?.displayName
+               || d.athletesInvolved?.[0]?.shortName
+               || '';
+    // Heurística: scoringPlay=true indica cobrança convertida
+    const scored = d.scoringPlay === true;
+    return { team: teamStr, player, scored };
+  });
+  let penH = 0, penA = 0;
+  shootoutKicks.forEach(k => {
+    if (k.scored) {
+      if (k.team === homeName) penH++;
+      else if (k.team === awayName) penA++;
+    }
+  });
+
+  const shortDetail = comp.status?.type?.shortDetail || '';
+  const inShootout = state === 'in' && (shootoutDetails.length > 0 || /penalt|shootout|pso/i.test(shortDetail));
   const wentToPenalties = state === 'post' && (
-    details.some(d => (d.type?.text || '').toLowerCase().includes('shootout')) ||
-    /pen|pso|shoot/i.test(comp.status?.type?.shortDetail || '')
+    shootoutDetails.length > 0 ||
+    /pen|pso|shoot/i.test(shortDetail)
   );
 
   return {
@@ -146,6 +172,9 @@ function buildGameCard(ev, comp) {
     isLive:      state === 'in',
     isFinished:  state === 'post',
     penalties:   wentToPenalties,
+    inShootout:  inShootout,
+    shootoutKicks: shootoutKicks.length ? shootoutKicks : undefined,
+    penScore:    shootoutKicks.length ? { h: penH, a: penA } : undefined,
     date:        ev.date,
     goals
   };

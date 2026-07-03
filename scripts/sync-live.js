@@ -130,14 +130,36 @@ function buildGameCard(ev, comp) {
   // — é só para exibição da disputa em tempo real.
   const shootoutDetails = details.filter(d => (d.type?.text || '').toLowerCase().includes('shootout'));
 
-  // ── DEBUG TEMPORÁRIO ─────────────────────────────────────────────────────
-  // Loga a estrutura bruta de QUALQUER detalhe que mencione pênalti/shootout,
-  // mesmo que não bata no filtro acima, para descobrirmos o formato real da
-  // ESPN. Remover depois de confirmado.
+  // ── DEBUG TEMPORÁRIO (ampliado) ─────────────────────────────────────────
+  // 1) Loga qualquer detalhe que mencione pênalti/shootout em details[]
+  // 2) SE o status indicar pênaltis mas nada foi achado em details[],
+  //    loga o objeto `comp` INTEIRO (competitors + status + tudo) — a
+  //    informação pode estar em outro lugar do JSON que não details[]
+  // Remover tudo isso depois de identificado o campo correto.
+  // ── DEBUG TEMPORÁRIO (v3 — incondicional) ────────────────────────────────
+  // Loga um resumo de TODO jogo já encerrado (state='post'), sem depender
+  // de nenhuma palavra-chave, pra ver exatamente o que a ESPN retorna.
+  // Remover tudo isso depois de identificado o campo correto.
+  if (state === 'post') {
+    console.log(`  [DEBUG POST] ${homeName} ${homeScore} x ${awayScore} ${awayName}`);
+    console.log(`    status.type = ${JSON.stringify(comp.status?.type)}`);
+    console.log(`    home.winner=${home.winner} away.winner=${away.winner}`);
+    console.log(`    details[] count = ${details.length}`);
+    if (details.length) {
+      console.log(`    details[].type.text únicos = ${JSON.stringify([...new Set(details.map(d => d.type?.text))])}`);
+    }
+  }
+
+  const shortDetailDebug = comp.status?.type?.shortDetail || comp.status?.type?.description || '';
   const suspectDetails = details.filter(d => /pen|shoot|pso/i.test(d.type?.text || ''));
+  const statusSuggestsPens = /pen|shoot|pso/i.test(shortDetailDebug);
   if (suspectDetails.length) {
-    console.log(`  [DEBUG SHOOTOUT] Jogo ${homeName} x ${awayName} (state=${state}):`);
+    console.log(`  [DEBUG SHOOTOUT-DETAILS] ${homeName} x ${awayName} (state=${state}):`);
     console.log(JSON.stringify(suspectDetails, null, 2));
+  }
+  if (statusSuggestsPens && !suspectDetails.length) {
+    console.log(`  [DEBUG SHOOTOUT-FULLCOMP] ${homeName} x ${awayName} (state=${state}, shortDetail="${shortDetailDebug}") — nada em details[], logando comp inteiro:`);
+    console.log(JSON.stringify(comp, null, 2));
   }
   const shootoutKicks = shootoutDetails.map(d => {
     let teamStr = teamName(d.team?.displayName || d.team?.name || '');

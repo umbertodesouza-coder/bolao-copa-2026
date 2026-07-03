@@ -96,7 +96,7 @@ function buildGameCard(ev, comp) {
   const goals = details
     .filter(d => {
       const t = (d.type?.text || '').toLowerCase();
-      if (t.includes('shootout')) return false;
+      if (d.shootout === true || t.includes('shootout')) return false;
       return d.scoringPlay === true || t.includes('goal');
     })
     .map(d => {
@@ -123,71 +123,16 @@ function buildGameCard(ev, comp) {
       };
     });
 
-  // ── Cobranças de pênalti (disputa por shootout) ─────────────────────────────
-  // Captura cada cobrança individualmente (autor + se converteu), funcionando
-  // TANTO durante o jogo ao vivo (state='in', disputa em andamento) QUANTO
-  // depois de encerrado (state='post'). Nunca conta para o placar/artilharia
-  // — é só para exibição da disputa em tempo real.
-  const shootoutDetails = details.filter(d => (d.type?.text || '').toLowerCase().includes('shootout'));
+  // ── Disputa de pênaltis (shootout) ──────────────────────────────────────────
+  // A ESPN entrega pronto o placar da disputa direto no objeto do time:
+  // competitor.shootoutScore (número). Não precisa interpretar cobrança por
+  // cobrança — muito mais simples e confiável.
+  const homeShootout = home.shootoutScore;
+  const awayShootout = away.shootoutScore;
+  const hasShootoutScore = homeShootout != null || awayShootout != null;
 
-  // ── DEBUG TEMPORÁRIO (ampliado) ─────────────────────────────────────────
-  // 1) Loga qualquer detalhe que mencione pênalti/shootout em details[]
-  // 2) SE o status indicar pênaltis mas nada foi achado em details[],
-  //    loga o objeto `comp` INTEIRO (competitors + status + tudo) — a
-  //    informação pode estar em outro lugar do JSON que não details[]
-  // Remover tudo isso depois de identificado o campo correto.
-  // ── DEBUG TEMPORÁRIO (v3 — incondicional) ────────────────────────────────
-  // Loga um resumo de TODO jogo já encerrado (state='post'), sem depender
-  // de nenhuma palavra-chave, pra ver exatamente o que a ESPN retorna.
-  // Remover tudo isso depois de identificado o campo correto.
-  if (state === 'post') {
-    console.log(`  [DEBUG POST] ${homeName} ${homeScore} x ${awayScore} ${awayName}`);
-    console.log(`    status.type = ${JSON.stringify(comp.status?.type)}`);
-    console.log(`    home.winner=${home.winner} away.winner=${away.winner}`);
-    console.log(`    details[] count = ${details.length}`);
-    if (details.length) {
-      console.log(`    details[].type.text únicos = ${JSON.stringify([...new Set(details.map(d => d.type?.text))])}`);
-    }
-  }
-
-  const shortDetailDebug = comp.status?.type?.shortDetail || comp.status?.type?.description || '';
-  const suspectDetails = details.filter(d => /pen|shoot|pso/i.test(d.type?.text || ''));
-  const statusSuggestsPens = /pen|shoot|pso/i.test(shortDetailDebug);
-  if (suspectDetails.length) {
-    console.log(`  [DEBUG SHOOTOUT-DETAILS] ${homeName} x ${awayName} (state=${state}):`);
-    console.log(JSON.stringify(suspectDetails, null, 2));
-  }
-  if (statusSuggestsPens && !suspectDetails.length) {
-    console.log(`  [DEBUG SHOOTOUT-FULLCOMP] ${homeName} x ${awayName} (state=${state}, shortDetail="${shortDetailDebug}") — nada em details[], logando comp inteiro:`);
-    console.log(JSON.stringify(comp, null, 2));
-  }
-  const shootoutKicks = shootoutDetails.map(d => {
-    let teamStr = teamName(d.team?.displayName || d.team?.name || '');
-    if (!teamStr && d.team?.id) {
-      if (String(d.team.id) === String(homeId)) teamStr = homeName;
-      else if (String(d.team.id) === String(awayId)) teamStr = awayName;
-    }
-    let player = d.athletesInvolved?.[0]?.displayName
-               || d.athletesInvolved?.[0]?.shortName
-               || '';
-    // Heurística: scoringPlay=true indica cobrança convertida
-    const scored = d.scoringPlay === true;
-    return { team: teamStr, player, scored };
-  });
-  let penH = 0, penA = 0;
-  shootoutKicks.forEach(k => {
-    if (k.scored) {
-      if (k.team === homeName) penH++;
-      else if (k.team === awayName) penA++;
-    }
-  });
-
-  const shortDetail = comp.status?.type?.shortDetail || '';
-  const inShootout = state === 'in' && (shootoutDetails.length > 0 || /penalt|shootout|pso/i.test(shortDetail));
-  const wentToPenalties = state === 'post' && (
-    shootoutDetails.length > 0 ||
-    /pen|pso|shoot/i.test(shortDetail)
-  );
+  const wentToPenalties = state === 'post' && hasShootoutScore;
+  const inShootout = state === 'in' && hasShootoutScore;
 
   // Campo 'winner' da ESPN — fonte confiável de quem venceu, funciona mesmo
   // quando o placar registrado fica empatado (decisão nos pênaltis). Vem
@@ -215,8 +160,7 @@ function buildGameCard(ev, comp) {
     penalties:   wentToPenalties,
     winner:      winnerSide,
     inShootout:  inShootout,
-    shootoutKicks: shootoutKicks.length ? shootoutKicks : null,
-    penScore:    shootoutKicks.length ? { h: penH, a: penA } : null,
+    penScore:    hasShootoutScore ? { h: homeShootout||0, a: awayShootout||0 } : null,
     date:        ev.date,
     goals
   };
